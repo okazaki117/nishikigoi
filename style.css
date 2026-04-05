@@ -1,0 +1,25 @@
+/* 全体のリセットと基本スタイル */
+body, html {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: #1a2a3a; /* 水面の深い色 */
+    font-family: 'Inter', sans-serif;
+}
+
+#game-container {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    /* プレミアムな水面のグラデーション */
+    background: radial-gradient(circle at center, #2b5c7a 0%, #153243 100%);
+    box-shadow: inset 0 0 50px rgba(0,0,0,0.5);
+}
+
+#game-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
