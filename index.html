@@ -8,8 +8,113 @@
 </head>
 <body>
     <div id="game-container">
-        <!-- フルスクリーンキャンバス -->
+        <!-- フルスクリーンキャンバス (背景レイヤー) -->
         <canvas id="game-canvas"></canvas>
+
+        <!-- トップHUD: ポイントとステータス -->
+        <div id="top-hud" class="glass-panel">
+            <div id="point-display">
+                <span class="label">所持ポイント</span>
+                <span id="current-points" class="value">0 pt</span>
+            </div>
+            <div id="koi-count-display">
+                <span class="label">池の錦鯉</span>
+                <span id="koi-count" class="value">0 / 10</span>
+            </div>
+        </div>
+
+        <!-- システムボタン群 (右上) -->
+        <div id="system-controls" class="glass-panel">
+            <button id="btn-upgrade" class="sys-btn" title="池を拡張する">📐 拡張</button>
+            <button id="btn-list" class="sys-btn" title="池の鯉を一覧で見る">🐟 一覧</button>
+            <button id="btn-collection" class="sys-btn" title="図鑑を見る">📖 図鑑</button>
+            <button id="btn-reset" class="sys-btn" title="最初からやり直す" style="color: #ffaa44;">🔄 リセット</button>
+        </div>
+
+        <!-- 鯉一覧パネル (右サイド、初期非表示) -->
+        <div id="koi-list-panel" class="glass-panel hidden">
+            <div class="list-header">
+                <h3>🐟 池の鯉一覧</h3>
+                <button id="btn-close-list" class="sys-btn" style="padding: 3px 10px; font-size: 0.8rem;">✕</button>
+            </div>
+            <div class="list-actions">
+                <button id="btn-list-breed" class="action-btn primary" disabled style="font-size: 0.85rem; padding: 8px 12px;">交配する</button>
+                <button id="btn-list-sell" class="action-btn secondary" disabled style="font-size: 0.85rem; padding: 6px 12px;">お別れ</button>
+                <button id="btn-list-deselect" class="sys-btn" style="font-size: 0.75rem; padding: 4px 8px;">全解除</button>
+            </div>
+            <div id="koi-list-container">
+                <!-- JSで動的生成 -->
+            </div>
+        </div>
+
+        <!-- アクション通知エリア -->
+        <div id="notification-area"></div>
+
+        <!-- アクションパネル (鯉選択時のみ下部中央にポップアップ表示) -->
+        <div id="action-panel" class="glass-panel hidden">
+            <!-- 選択中の親プレビュー -->
+            <div id="selected-parents">
+                <div class="parent-slot" id="slot-parent-1" title="クリックで選択解除">
+                    <canvas id="canvas-parent-1" width="60" height="60"></canvas>
+                    <div class="slot-label">親 1</div>
+                </div>
+                <div class="parent-slot" id="slot-parent-2" title="クリックで選択解除">
+                    <canvas id="canvas-parent-2" width="60" height="60"></canvas>
+                    <div class="slot-label">親 2</div>
+                </div>
+            </div>
+            
+            <!-- 交配・お別れボタン -->
+            <div id="current-actions">
+                <button id="btn-breed" class="action-btn primary" disabled>交配する</button>
+                <button id="btn-sell" class="action-btn secondary" disabled>お別れ</button>
+            </div>
+        </div>
+
+        <!-- 図鑑モーダル (初期非表示) -->
+        <div id="collection-modal" class="modal hidden">
+            <div class="modal-content glass-panel" style="width: 90%; max-width: 800px; max-height: 90vh; overflow-y: auto;">
+                <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 10px; margin-bottom: 20px;">
+                    <h2 style="margin: 0;">錦鯉図鑑 -殿堂入り-</h2>
+                    <button id="btn-close-modal" class="sys-btn" style="padding: 5px 15px;">閉じる</button>
+                </div>
+                
+                <div class="modal-body">
+                    <!-- 1. トップ展示（最高記録） -->
+                    <div class="collection-section">
+                        <h3>🏆 歴代最高記録</h3>
+                        <div id="records-container" class="records-grid">
+                            <div class="record-card">
+                                <div class="record-title">歴代最高評価額</div>
+                                <canvas id="canvas-record-value" width="120" height="120"></canvas>
+                                <div id="record-value-info" class="record-info">まだ記録がありません</div>
+                            </div>
+                            <div class="record-card">
+                                <div class="record-title">歴代最大サイズ</div>
+                                <canvas id="canvas-record-size" width="120" height="120"></canvas>
+                                <div id="record-size-info" class="record-info">まだ記録がありません</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 2. 品種コンプリート -->
+                    <div class="collection-section">
+                        <h3>📖 品種コレクション</h3>
+                        <div id="breeds-container" class="breeds-grid">
+                            <!-- JSで動的生成 -->
+                        </div>
+                    </div>
+
+                    <!-- 3. 名品アルバム -->
+                    <div class="collection-section">
+                        <h3>📸 名品アルバム (ランクA以上)</h3>
+                        <div id="album-container" class="album-grid">
+                            <!-- JSで動的生成 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
     <script src="main.js"></script>
 </body>
