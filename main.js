@@ -460,16 +460,25 @@ function showNotification(text) {
 }
 
 // --- Event Listeners ---
-// マウス座標のトラッキング
+// ポインター（マウス・タッチ共通）座標のトラッキング
 let mouseX = -100;
 let mouseY = -100;
 
-canvas.addEventListener('mousemove', (e) => {
+canvas.addEventListener('pointermove', (e) => {
+    e.preventDefault(); // スクロール防止
     const rect = canvas.getBoundingClientRect();
     mouseX = e.clientX - rect.left;
     mouseY = e.clientY - rect.top;
+}, { passive: false });
+
+canvas.addEventListener('pointerleave', () => {
+    mouseX = -100;
+    mouseY = -100;
 });
-canvas.addEventListener('mouseleave', () => {
+canvas.addEventListener('pointerup', (e) => {
+    e.preventDefault();
+}, { passive: false });
+canvas.addEventListener('pointercancel', () => {
     mouseX = -100;
     mouseY = -100;
 });
@@ -491,10 +500,15 @@ slot2.addEventListener('click', () => {
     if (parents.length > 1) { parents[1].selected = false; updateHud(); }
 });
 
-canvas.addEventListener('click', (e) => {
+canvas.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); // ダブルタップズーム防止
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+    
+    // タッチデバイスではポインター座標をここで更新しておく
+    mouseX = x;
+    mouseY = y;
 
     let clickedKoi = null;
     for (let i = pond.length - 1; i >= 0; i--) {
@@ -509,7 +523,7 @@ canvas.addEventListener('click', (e) => {
         updateHud();
         if (!koiListPanel.classList.contains('hidden')) updateKoiListUI();
     }
-});
+}, { passive: false });
 
 btnBreed.addEventListener('click', () => {
     const parents = pond.filter(k => k.selected);
