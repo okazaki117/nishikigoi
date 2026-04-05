@@ -53,6 +53,12 @@ let upgradeCost = 1000;       // 池拡張の必要ポイント
 let currentPondRadius = 0;    // アニメーション用（初期値0）
 let targetPondRadius = 180;   // 目標となる池の半径
 
+// パフォーマンス: 池のグラデーションキャッシュ
+let cachedGradient = null;
+let cachedGradientRadius = 0;
+let cachedGradientCx = 0;
+let cachedGradientCy = 0;
+
 // --- 図鑑データ (Step 5) ---
 let collectionData = {
     records: {
@@ -829,8 +835,6 @@ class Koi {
             ctx.rotate(-Math.PI / 2);
             ctx.scale(displayScale, displayScale);
 
-            ctx.shadowColor = 'rgba(255, 255, 255, 1.0)';
-            ctx.shadowBlur = 40;
             ctx.fillStyle = `rgba(255, 255, 255, ${Math.sin(progress * Math.PI) * 0.5})`;
             ctx.beginPath();
             ctx.arc(0, 0, this.size * 3, 0, Math.PI * 2);
@@ -840,18 +844,20 @@ class Koi {
         }
 
         if (this.selected) {
-            ctx.shadowColor = 'rgba(255, 255, 255, 0.8)';
-            ctx.shadowBlur = 20;
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+            // 半透明+線描画で選択状態を表現
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
             ctx.lineWidth = 3;
             ctx.beginPath();
             ctx.arc(0, 0, this.size * 2.5, 0, Math.PI * 2);
+            ctx.fill();
             ctx.stroke();
         } else if (this.state !== 'born') {
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
-            ctx.shadowBlur = 10;
-            ctx.shadowOffsetX = 5;
-            ctx.shadowOffsetY = 10;
+            // 影の代わりに黒い楕円を後ろに描画する
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+            ctx.beginPath();
+            ctx.ellipse(5, 10, this.size * 1.4, this.size * 0.6, 0, 0, Math.PI * 2);
+            ctx.fill();
         }
 
         ctx.fillStyle = this.dna.baseColor;
@@ -884,17 +890,14 @@ class Koi {
         ctx.fill();
         ctx.restore();
 
-        ctx.shadowColor = 'transparent';
         ctx.globalAlpha = 1.0;
 
-        ctx.beginPath();
-        ctx.ellipse(0, 0, this.size * 1.4, this.size * 0.6, 0, 0, Math.PI * 2);
-        ctx.fill();
-
+        // 体の楕円を描画しつつ、模様描画のクリップにも使う（パス生成1回で済む）
         ctx.save();
         ctx.beginPath();
         ctx.ellipse(0, 0, this.size * 1.4, this.size * 0.6, 0, 0, Math.PI * 2);
-        ctx.clip(); 
+        ctx.fill(); // 体を描画
+        ctx.clip(); // 同じパスでクリップ
 
         ctx.fillStyle = this.dna.patternColor;
         this.patternSpots.forEach(spot => {
@@ -902,7 +905,7 @@ class Koi {
             ctx.arc(spot.ox, spot.oy, spot.r, 0, Math.PI * 2);
             ctx.fill();
         });
-        ctx.restore(); 
+        ctx.restore();
 
         ctx.fillStyle = '#111111';
         ctx.beginPath();
@@ -918,24 +921,33 @@ class Koi {
             ctx.save();
             ctx.translate(this.x, this.y);
             ctx.textAlign = 'center';
-            ctx.shadowColor = 'rgba(0,0,0,0.8)';
-            ctx.shadowBlur = 4;
+            ctx.lineJoin = 'round';
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = 'rgba(0,0,0,0.8)';
             
             if (this.state === 'born') {
                 ctx.fillStyle = '#ffffff';
                 ctx.font = '24px bold Inter';
                 let yPos = -this.size * 3 * displayScale;
-                ctx.fillText(`Gen ${this.generation} Rank: ${this.rank} / ${this.size.toFixed(1)} cm / 評価額 ${this.value} 万円`, 0, yPos);
+                const txt = `Gen ${this.generation} Rank: ${this.rank} / ${this.size.toFixed(1)} cm / 評価額 ${this.value} 万円`;
+                ctx.strokeText(txt, 0, yPos);
+                ctx.fillText(txt, 0, yPos);
             } else if (this.selected) {
                 ctx.fillStyle = '#ffffff';
                 ctx.font = '14px bold Inter';
-                ctx.fillText(`Gen ${this.generation} Rank: ${this.rank} / ${this.size.toFixed(1)} cm / ${this.value} 万円`, 0, -this.size * 2 * displayScale);
+                let yPos = -this.size * 2 * displayScale;
+                const txt = `Gen ${this.generation} Rank: ${this.rank} / ${this.size.toFixed(1)} cm / ${this.value} 万円`;
+                ctx.strokeText(txt, 0, yPos);
+                ctx.fillText(txt, 0, yPos);
             } else if (isHovered) {
                 // ホバー時のさりげない表示
                 ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
                 ctx.font = '11px normal Inter';
-                ctx.shadowBlur = 2; // シャドウも弱めに
-                ctx.fillText(`Gen ${this.generation} | Rank ${this.rank}`, 0, -this.size * 1.8);
+                ctx.lineWidth = 2; // 少し細く
+                let yPos = -this.size * 1.8;
+                const txt = `Gen ${this.generation} | Rank ${this.rank}`;
+                ctx.strokeText(txt, 0, yPos);
+                ctx.fillText(txt, 0, yPos);
             }
             ctx.restore();
         }
@@ -1019,9 +1031,11 @@ class FloatingText {
         ctx.globalAlpha = this.alpha;
         ctx.font = 'bold 20px Inter, sans-serif';
         ctx.textAlign = 'center';
-        ctx.shadowColor = 'rgba(0,0,0,0.8)';
-        ctx.shadowBlur = 4;
         ctx.fillStyle = this.color;
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+        ctx.strokeText(this.text, this.x, this.y);
         ctx.fillText(this.text, this.x, this.y);
         ctx.restore();
     }
@@ -1056,9 +1070,16 @@ class Visitor {
         // 池の中心を向く
         ctx.rotate(this.angle - Math.PI/2);
         
+        // 影を描画（shadowBlurの代替）
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.beginPath();
+        ctx.arc(3, 8, 20, Math.PI, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(3, -7, 12, 0, Math.PI * 2);
+        ctx.fill();
+
         ctx.fillStyle = '#1e293b';
-        ctx.shadowColor = 'rgba(0,0,0,0.5)';
-        ctx.shadowBlur = 10;
         
         // 体
         ctx.beginPath();
@@ -1283,32 +1304,42 @@ function gameLoop() {
     const cy = POND_CY();
 
     if (currentPondRadius > 10) {
-        ctx.save();
-        
-        // 丸い池の形を作る
+        // 池のグラデーションをキャッシュ（半径が変わらない限り再利用）
+        let radiusInt = Math.round(currentPondRadius);
+        if (!cachedGradient || cachedGradientRadius !== radiusInt || cachedGradientCx !== cx || cachedGradientCy !== cy) {
+            cachedGradient = ctx.createRadialGradient(cx, cy, radiusInt * 0.2, cx, cy, radiusInt);
+            cachedGradient.addColorStop(0, '#2b5c7a');
+            cachedGradient.addColorStop(1, '#153243');
+            cachedGradientRadius = radiusInt;
+            cachedGradientCx = cx;
+            cachedGradientCy = cy;
+        }
+
+        // 池の水面を描画
         ctx.beginPath();
         ctx.arc(cx, cy, currentPondRadius, 0, Math.PI * 2);
-        
-        // 池の内部の水色のグラデーション
-        let gradient = ctx.createRadialGradient(cx, cy, currentPondRadius * 0.2, cx, cy, currentPondRadius);
-        gradient.addColorStop(0, '#2b5c7a');
-        gradient.addColorStop(1, '#153243');
-        ctx.fillStyle = gradient;
+        ctx.fillStyle = cachedGradient;
         ctx.fill();
 
-        // 枠・影（フチの表現）
-        ctx.lineWidth = 10;
-        ctx.strokeStyle = '#04080a';
-        ctx.stroke();
-
-        // 池の領域内だけでクリッピングして鯉を描画する
-        ctx.clip();
-
+        // 鯉の更新・描画（clip()を使わない軽量方式）
         pond.forEach(koi => {
             koi.update(canvas.width, canvas.height);
             koi.draw(ctx);
         });
 
+        // 池のフチを後から上書き描画して、はみ出た鯉を隠す
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(cx, cy, currentPondRadius + 15, 0, Math.PI * 2);
+        ctx.arc(cx, cy, currentPondRadius, 0, Math.PI * 2, true); // 内側を反転して穴にする
+        ctx.fillStyle = '#0b1115';
+        ctx.fill();
+        // 池の枠線
+        ctx.beginPath();
+        ctx.arc(cx, cy, currentPondRadius, 0, Math.PI * 2);
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = '#04080a';
+        ctx.stroke();
         ctx.restore();
     }
 
