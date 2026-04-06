@@ -376,98 +376,407 @@ function breedKoi(parentA, parentB) {
     const hasColor = (c) => parentColors.includes(c);
 
     // 突然変異（親にない色が出る、または色が変わる）の判定
-    // 基本は親の色を忠実に遺伝（70%以上）するため、変異率は25%からスタート
-    let mutationRate = 0.25;
+    // 基本は親の色を忠実に遺伝（50%以上）するため、変異率は50%からスタート
+    let mutationRate = 0.50;
     
     // 両親が白黒のみの場合は進行のため変異率を上げる
     let isOnlyBasicColors = parentColors.every(c => c === '#f8f9fa' || c === '#343a40');
     if (isOnlyBasicColors && nextGen >= 2) mutationRate = 0.8;
 
-    // 特別な固定変異（通常変異プールより優先・独立判定）
-    let specialMutation = false;
-    let r = Math.random();
+    // 特別な固定変異（重み付けシステム）
+    let applicableRules = [];
 
-    // 1. 金×金 -> 黄金(金単色) 5%
+    // 1. 金×金 -> 黄金(金単色) 重み4（2から調整、レアだが適度な確率）
     if ((parentA.dna.baseColor === '#ffcc00' || parentA.dna.patternColor === '#ffcc00') && 
         (parentB.dna.baseColor === '#ffcc00' || parentB.dna.patternColor === '#ffcc00')) {
-        if (r < 0.05) {
-            newDna.baseColor = '#ffcc00';
-            newDna.patternColor = '#ffcc00';
-            newDna.patternDensity = 0.5; // どうせ単色だがバグ防止
-            specialMutation = true;
-        }
+        applicableRules.push({
+            weight: 4,
+            apply: () => {
+                newDna.baseColor = '#ffcc00';
+                newDna.patternColor = '#ffcc00';
+                newDna.patternDensity = 0.5;
+                return 'gold_gold_to_gold';
+            }
+        });
     }
 
-    if (!specialMutation) {
-        // 2. 紫（どちらかに含まれる） -> 金柄 10%
-        if (hasColor('#9b59b6')) {
-            if (r < 0.10) {
+    // 2. 紫（どちらかに含まれる） -> 金柄 重み8（10から変更）
+    if (hasColor('#9b59b6')) {
+        applicableRules.push({
+            weight: 8,
+            apply: () => {
                 let applyBase = Math.random() < 0.5;
                 newDna.baseColor = applyBase ? '#ffcc00' : newDna.baseColor;
                 newDna.patternColor = !applyBase ? '#ffcc00' : newDna.patternColor;
-                specialMutation = true;
+                return 'purple_to_gold';
             }
-        }
+        });
     }
 
-    if (!specialMutation) {
-        // 3. 赤＆青（両方含まれる） -> 紫柄 20%
-        if (hasColor('#ff4d4d') && hasColor('#1aa3ff')) {
-            if (r < 0.20) {
+    // 2b. 紫を含む鯉同士の交配で紫単色が生まれる 重み10（8から変更）
+    if (hasColor('#9b59b6')) {
+        applicableRules.push({
+            weight: 10,
+            apply: () => {
+                newDna.baseColor = '#9b59b6';
+                newDna.patternColor = '#9b59b6';
+                newDna.patternDensity = 0.5;
+                return 'purple_to_purple_single';
+            }
+        });
+    }
+
+    // 3. 赤＆青（両方含まれる） -> 紫柄 重み12（10から調整、赤＋青と同じ確率）
+    if (hasColor('#ff4d4d') && hasColor('#1aa3ff')) {
+        applicableRules.push({
+            weight: 12,
+            apply: () => {
                 let applyBase = Math.random() < 0.5;
                 newDna.baseColor = applyBase ? '#9b59b6' : newDna.baseColor;
                 newDna.patternColor = !applyBase ? '#9b59b6' : newDna.patternColor;
-                specialMutation = true;
+                return 'red_blue_to_purple';
             }
-        }
+        });
     }
 
-    if (!specialMutation) {
-        // 4. 赤から青が生まれる (10世代目付近で安定して出るように段階的に確率アップ)
-        if (hasColor('#ff4d4d') && !hasColor('#1aa3ff')) {
-            let blueChance = 0.02 + (nextGen * 0.015); // 初弾は低めだが10世代で約17%
-            if (r < blueChance) {
+    // 3b. 赤＆青（両方含まれる） -> 紫単色 重み5（紫単色専用ルール）
+    if (hasColor('#ff4d4d') && hasColor('#1aa3ff')) {
+        applicableRules.push({
+            weight: 5,
+            apply: () => {
+                newDna.baseColor = '#9b59b6';
+                newDna.patternColor = '#9b59b6';
+                newDna.patternDensity = 0.5;
+                return 'red_blue_to_purple_single';
+            }
+        });
+    }
+
+    // 3c. 赤＆青（両方含まれる） -> 赤＋青（紅蒼錦） 重み12
+    if (hasColor('#ff4d4d') && hasColor('#1aa3ff')) {
+        applicableRules.push({
+            weight: 12,
+            apply: () => {
+                // 赤＋青の組み合わせを生成
+                let isRedBase = Math.random() < 0.5;
+                newDna.baseColor = isRedBase ? '#ff4d4d' : '#1aa3ff';
+                newDna.patternColor = isRedBase ? '#1aa3ff' : '#ff4d4d';
+                newDna.patternDensity = 0.3 + Math.random() * 0.4;
+                return 'red_blue_to_kousou';
+            }
+        });
+    }
+
+    // 4. 白を含む鯉同士の交配で赤＋白（紅白）が生まれる 重み15
+    if (hasColor('#f8f9fa') && hasColor('#ff4d4d')) {
+        applicableRules.push({
+            weight: 15,
+            apply: () => {
+                // 赤＋白の組み合わせを生成
+                let isRedBase = Math.random() < 0.5;
+                newDna.baseColor = isRedBase ? '#ff4d4d' : '#f8f9fa';
+                newDna.patternColor = isRedBase ? '#f8f9fa' : '#ff4d4d';
+                newDna.patternDensity = 0.3 + Math.random() * 0.4;
+                return 'white_red_to_kohaku';
+            }
+        });
+    }
+
+    // 5. 白を含む鯉同士の交配で青＋白（秋翠）が生まれる 重み15
+    if (hasColor('#f8f9fa') && hasColor('#1aa3ff')) {
+        applicableRules.push({
+            weight: 15,
+            apply: () => {
+                // 青＋白の組み合わせを生成
+                let isBlueBase = Math.random() < 0.5;
+                newDna.baseColor = isBlueBase ? '#1aa3ff' : '#f8f9fa';
+                newDna.patternColor = isBlueBase ? '#f8f9fa' : '#1aa3ff';
+                newDna.patternDensity = 0.3 + Math.random() * 0.4;
+                return 'white_blue_to_shusui';
+            }
+        });
+    }
+
+    // 5b. 白＋紫（紫紅白）が生まれる 重み12
+    if (hasColor('#f8f9fa') && hasColor('#9b59b6')) {
+        applicableRules.push({
+            weight: 12,
+            apply: () => {
+                // 白＋紫の組み合わせを生成
+                let isWhiteBase = Math.random() < 0.5;
+                newDna.baseColor = isWhiteBase ? '#f8f9fa' : '#9b59b6';
+                newDna.patternColor = isWhiteBase ? '#9b59b6' : '#f8f9fa';
+                newDna.patternDensity = 0.3 + Math.random() * 0.4;
+                return 'white_purple_to_murasaki_kohaku';
+            }
+        });
+    }
+
+    // 5c. 白＋黒（白写り）が生まれる 重み10
+    if (hasColor('#f8f9fa') && hasColor('#343a40')) {
+        applicableRules.push({
+            weight: 10,
+            apply: () => {
+                // 白＋黒の組み合わせを生成
+                let isWhiteBase = Math.random() < 0.5;
+                newDna.baseColor = isWhiteBase ? '#f8f9fa' : '#343a40';
+                newDna.patternColor = isWhiteBase ? '#343a40' : '#f8f9fa';
+                newDna.patternDensity = 0.3 + Math.random() * 0.4;
+                return 'white_black_to_shiro_utsuri';
+            }
+        });
+    }
+
+    // 5d. 黒＋赤（昭和三色）が生まれる 重み10
+    if (hasColor('#343a40') && hasColor('#ff4d4d')) {
+        applicableRules.push({
+            weight: 10,
+            apply: () => {
+                // 黒＋赤の組み合わせを生成
+                let isBlackBase = Math.random() < 0.5;
+                newDna.baseColor = isBlackBase ? '#343a40' : '#ff4d4d';
+                newDna.patternColor = isBlackBase ? '#ff4d4d' : '#343a40';
+                newDna.patternDensity = 0.3 + Math.random() * 0.4;
+                return 'black_red_to_showa';
+            }
+        });
+    }
+
+    // 5e. 黒＋青（黒青錦）が生まれる 重み10
+    if (hasColor('#343a40') && hasColor('#1aa3ff')) {
+        applicableRules.push({
+            weight: 10,
+            apply: () => {
+                // 黒＋青の組み合わせを生成
+                let isBlackBase = Math.random() < 0.5;
+                newDna.baseColor = isBlackBase ? '#343a40' : '#1aa3ff';
+                newDna.patternColor = isBlackBase ? '#1aa3ff' : '#343a40';
+                newDna.patternDensity = 0.3 + Math.random() * 0.4;
+                return 'black_blue_to_kokusei';
+            }
+        });
+    }
+
+    // 5f. 紫＋青（紫蒼錦）が生まれる 重み10
+    if (hasColor('#9b59b6') && hasColor('#1aa3ff')) {
+        applicableRules.push({
+            weight: 10,
+            apply: () => {
+                // 紫＋青の組み合わせを生成
+                let isPurpleBase = Math.random() < 0.5;
+                newDna.baseColor = isPurpleBase ? '#9b59b6' : '#1aa3ff';
+                newDna.patternColor = isPurpleBase ? '#1aa3ff' : '#9b59b6';
+                newDna.patternDensity = 0.3 + Math.random() * 0.4;
+                return 'purple_blue_to_murasaki_ao';
+            }
+        });
+    }
+
+    // 5g. 黒＋紫（紫写り）が生まれる 重み10
+    if (hasColor('#343a40') && hasColor('#9b59b6')) {
+        applicableRules.push({
+            weight: 10,
+            apply: () => {
+                // 黒＋紫の組み合わせを生成
+                let isBlackBase = Math.random() < 0.5;
+                newDna.baseColor = isBlackBase ? '#343a40' : '#9b59b6';
+                newDna.patternColor = isBlackBase ? '#9b59b6' : '#343a40';
+                newDna.patternDensity = 0.3 + Math.random() * 0.4;
+                return 'black_purple_to_murasaki_utsuri';
+            }
+        });
+    }
+
+    // 5h. 紫＋赤（紫紅錦）が生まれる 重み10
+    if (hasColor('#9b59b6') && hasColor('#ff4d4d')) {
+        applicableRules.push({
+            weight: 10,
+            apply: () => {
+                // 紫＋赤の組み合わせを生成
+                let isPurpleBase = Math.random() < 0.5;
+                newDna.baseColor = isPurpleBase ? '#9b59b6' : '#ff4d4d';
+                newDna.patternColor = isPurpleBase ? '#ff4d4d' : '#9b59b6';
+                newDna.patternDensity = 0.3 + Math.random() * 0.4;
+                return 'purple_red_to_murasaki_aka';
+            }
+        });
+    }
+
+    // 6. 赤 -> 赤単色 重み10
+    if (hasColor('#ff4d4d') && !hasColor('#1aa3ff')) {
+        applicableRules.push({
+            weight: 10,
+            apply: () => {
+                newDna.baseColor = '#ff4d4d';
+                newDna.patternColor = '#ff4d4d';
+                newDna.patternDensity = 0.5;
+                return 'red_to_red_single';
+            }
+        });
+    }
+
+    // 7. 青 -> 青単色 重み10
+    if (hasColor('#1aa3ff') && !hasColor('#ff4d4d')) {
+        applicableRules.push({
+            weight: 10,
+            apply: () => {
+                newDna.baseColor = '#1aa3ff';
+                newDna.patternColor = '#1aa3ff';
+                newDna.patternDensity = 0.5;
+                return 'blue_to_blue_single';
+            }
+        });
+    }
+
+    // 8. 赤＆青 -> 赤単色 または 青単色 重み7（赤単色）、7（青単色）
+    if (hasColor('#ff4d4d') && hasColor('#1aa3ff')) {
+        applicableRules.push({
+            weight: 7,
+            apply: () => {
+                newDna.baseColor = '#ff4d4d';
+                newDna.patternColor = '#ff4d4d';
+                newDna.patternDensity = 0.5;
+                return 'red_blue_to_red_single';
+            }
+        });
+        applicableRules.push({
+            weight: 7,
+            apply: () => {
+                newDna.baseColor = '#1aa3ff';
+                newDna.patternColor = '#1aa3ff';
+                newDna.patternDensity = 0.5;
+                return 'red_blue_to_blue_single';
+            }
+        });
+    }
+
+    // 9. 赤 -> 青（世代依存）動的重み Math.floor(3 + (nextGen * 2))
+    if (hasColor('#ff4d4d') && !hasColor('#1aa3ff')) {
+        const dynamicWeight = Math.floor(3 + (nextGen * 2));
+        applicableRules.push({
+            weight: dynamicWeight,
+            apply: () => {
                 let applyBase = Math.random() < 0.5;
                 newDna.baseColor = applyBase ? '#1aa3ff' : newDna.baseColor;
                 newDna.patternColor = !applyBase ? '#1aa3ff' : newDna.patternColor;
-                specialMutation = true;
+                return 'red_to_blue_generation';
             }
+        });
+    }
+
+    // 10. 白黒のみ -> 赤柄 または 青柄 重み20（赤柄）、10（青柄）
+    if (isOnlyBasicColors && nextGen >= 2) {
+        applicableRules.push({
+            weight: 20,
+            apply: () => {
+                let applyBase = Math.random() < 0.5;
+                newDna.baseColor = applyBase ? '#ff4d4d' : newDna.baseColor;
+                newDna.patternColor = !applyBase ? '#ff4d4d' : newDna.patternColor;
+                return 'white_black_to_red';
+            }
+        });
+        applicableRules.push({
+            weight: 10,
+            apply: () => {
+                let applyBase = Math.random() < 0.5;
+                newDna.baseColor = applyBase ? '#1aa3ff' : newDna.baseColor;
+                newDna.patternColor = !applyBase ? '#1aa3ff' : newDna.patternColor;
+                return 'white_black_to_blue';
+            }
+        });
+    }
+
+    // 11. 白単色 -> 黒単色 重み10
+    if (parentColors.every(c => c === '#f8f9fa')) {
+        applicableRules.push({
+            weight: 10,
+            apply: () => {
+                newDna.baseColor = '#343a40';
+                newDna.patternColor = '#343a40';
+                newDna.patternDensity = 0.5;
+                return 'white_single_to_black_single';
+            }
+        });
+    }
+
+    // 12. 赤/青 -> 黒色 重み5
+    if ((hasColor('#ff4d4d') || hasColor('#1aa3ff')) && !hasColor('#343a40')) {
+        applicableRules.push({
+            weight: 5,
+            apply: () => {
+                let applyBase = Math.random() < 0.5;
+                newDna.baseColor = applyBase ? '#343a40' : newDna.baseColor;
+                newDna.patternColor = !applyBase ? '#343a40' : newDna.patternColor;
+                return 'red_blue_to_black';
+            }
+        });
+    }
+
+    // 13. 黒色救済措置 重み10
+    if (!hasColor('#343a40') && nextGen >= 3) {
+        // 池内のどの鯉にも黒色が含まれないか確認
+        let anyBlackInPond = pond.some(k => 
+            k.dna.baseColor === '#343a40' || k.dna.patternColor === '#343a40'
+        );
+        if (!anyBlackInPond) {
+            applicableRules.push({
+                weight: 10,
+                apply: () => {
+                    let applyBase = Math.random() < 0.5;
+                    newDna.baseColor = applyBase ? '#343a40' : newDna.baseColor;
+                    newDna.patternColor = !applyBase ? '#343a40' : newDna.patternColor;
+                    return 'black_rescue';
+                }
+            });
         }
     }
 
-    // 5. 白黒のみ -> 赤柄 20% / 青柄 10%
-    if (!specialMutation && isOnlyBasicColors && nextGen >= 2) {
-        if (r < 0.20) {
-            let applyBase = Math.random() < 0.5;
-            newDna.baseColor = applyBase ? '#ff4d4d' : newDna.baseColor;
-            newDna.patternColor = !applyBase ? '#ff4d4d' : newDna.patternColor;
-            specialMutation = true;
-        } else if (r < 0.30) {
-            let applyBase = Math.random() < 0.5;
-            newDna.baseColor = applyBase ? '#1aa3ff' : newDna.baseColor;
-            newDna.patternColor = !applyBase ? '#1aa3ff' : newDna.patternColor;
-            specialMutation = true;
+    // 14. 通常の遺伝（何も特別な変異が起こらない）重み30
+    applicableRules.push({
+        weight: 30,
+        apply: () => {
+            // 何も特別な変異が起こらない（通常の遺伝のみ）
+            // 50%の確率で通常の変異が追加で発生
+            if (Math.random() < 0.5) {
+                // 通常の変異プール
+                let pool = ['#f8f9fa', '#343a40'];
+                if (nextGen >= 2) pool.push('#ff4d4d');
+                if (nextGen >= 3) pool.push('#1aa3ff');
+                
+                let newColor = pool[Math.floor(Math.random() * pool.length)];
+                if (newColor !== newDna.baseColor && newColor !== newDna.patternColor) {
+                    if (Math.random() < 0.5) newDna.baseColor = newColor;
+                    else newDna.patternColor = newColor;
+                    
+                    if (newDna.patternDensity < 0.2 || newDna.patternDensity > 0.8) {
+                        newDna.patternDensity = 0.3 + Math.random() * 0.4;
+                    }
+                }
+            }
+            return 'normal_inheritance';
         }
-    }
+    });
 
-    // 特別変異がなく、通常の変異判定を満たした場合
-    if (!specialMutation && Math.random() < mutationRate) {
-        // その他通常のランダム変異（プールから選ぶ）
-        let pool = ['#f8f9fa', '#343a40'];
-        if (nextGen >= 2) pool.push('#ff4d4d');
-        if (nextGen >= 3) pool.push('#1aa3ff');
+    // 重み付けシステムによるルール選択
+    if (applicableRules.length > 0) {
+        // 総重みを計算
+        let totalWeight = applicableRules.reduce((sum, rule) => sum + rule.weight, 0);
         
-        let newColor = pool[Math.floor(Math.random() * pool.length)];
-
-        // 変異した色をベースかパターンのどちらかに上書きする
-        if (newColor !== newDna.baseColor && newColor !== newDna.patternColor) {
-            if (Math.random() < 0.5) newDna.baseColor = newColor;
-            else newDna.patternColor = newColor;
-            
-            // 模様が見えるように密度を調整
-            if (newDna.patternDensity < 0.2 || newDna.patternDensity > 0.8) {
-                newDna.patternDensity = 0.3 + Math.random() * 0.4;
+        // 重みに基づいてルールを選択
+        let randomValue = Math.random() * totalWeight;
+        let accumulatedWeight = 0;
+        let selectedRule = null;
+        
+        for (let rule of applicableRules) {
+            accumulatedWeight += rule.weight;
+            if (randomValue <= accumulatedWeight) {
+                selectedRule = rule;
+                break;
             }
+        }
+        
+        if (selectedRule) {
+            selectedRule.apply();
         }
     }
 
