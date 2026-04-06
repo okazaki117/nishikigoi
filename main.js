@@ -80,7 +80,9 @@ const KOI_BREEDS = [
     { id: 'shiro_utsuri', name: '白写り', desc: '白黒の水墨画模様' },
     { id: 'showa', name: '昭和三色', desc: '黒と赤の力強いコントラスト' },
     { id: 'shusui', name: '秋翠', desc: '青を含む鮮やかな模様' },
-    { id: 'murasaki', name: '紫鯉', desc: '赤と青が交わる希少種' },
+    { id: 'kousou', name: '紅蒼錦', desc: '赤と青が交わる希少種' },
+    { id: 'murasaki_single', name: '紫単色', desc: '高貴な深い紫の単色' },
+    { id: 'murasaki_kohaku', name: '紫紅白', desc: '白地に紫が映える模様' },
     { id: 'hikarimono', name: '光り物', desc: '金を含む神々しい模様' }
 ];
 
@@ -97,6 +99,7 @@ function analyzeBreed(dna) {
         if (color === '#343a40') return 'karasu';
         if (color === '#ff4d4d') return 'higoi';
         if (color === '#1aa3ff') return 'asagi';
+        if (color === '#9b59b6') return 'murasaki_single';
         if (color === '#ffcc00') return 'ogon';
     } else {
         if (b === '#ffcc00' || p === '#ffcc00') return 'hikarimono';
@@ -105,7 +108,8 @@ function analyzeBreed(dna) {
         if (has('#f8f9fa') && has('#343a40')) return 'shiro_utsuri';
         if (has('#343a40') && has('#ff4d4d')) return 'showa';
         if (has('#1aa3ff') && (has('#f8f9fa') || has('#343a40'))) return 'shusui';
-        if (has('#1aa3ff') && has('#ff4d4d')) return 'murasaki';
+        if (has('#1aa3ff') && has('#ff4d4d')) return 'kousou';
+        if (has('#9b59b6') && has('#f8f9fa')) return 'murasaki_kohaku';
     }
     return null; // 不明な組み合わせ（基本発生しない）
 }
@@ -292,19 +296,20 @@ let lastVisitorTime = Date.now();
 
 // --- Game Logic ---
 function evaluateKoi(dna, size, generation) {
-    let score = 100 + (generation * 20); // 基礎スコア（世代の深さも加算）
+    let score = 100; // 基礎スコア（世代の深さでの一律加算を削除。別に世代係数があるのでそれで評価）
     
     let isSingleColor = (dna.baseColor === dna.patternColor) || (dna.patternDensity <= 0.12) || (dna.patternDensity >= 0.88);
-    // 単色の金色かどうか
+    // 単色の特別な色かどうか
     let isGoldenOgon = isSingleColor && (dna.baseColor === '#ffcc00');
+    let isPurpleSingle = isSingleColor && (dna.baseColor === '#9b59b6');
 
     // 世代係数：若い世代は加味ボーナスが低く、5世代〜10世代以降で爆発的に価値が上がる
     let genFactor = 0.3 + (generation * 0.12);
 
-    if (isSingleColor && !isGoldenOgon) {
+    if (isSingleColor && !isGoldenOgon && !isPurpleSingle) {
         score -= 50; // 通常の単色は低く評価される
     } else {
-        if (!isGoldenOgon) {
+        if (!isGoldenOgon && !isPurpleSingle) {
             score += 200 * genFactor; // 複数色ボーナス
             
             // 模様のバランスによるボーナス
@@ -314,8 +319,17 @@ function evaluateKoi(dna, size, generation) {
     }
 
     // 特定の組み合わせボーナス
-    if (dna.baseColor === '#f8f9fa' && dna.patternColor === '#ff4d4d') score += 500 * genFactor;
-    if (dna.baseColor === '#343a40' && dna.patternColor === '#ff4d4d') score += 400 * genFactor;
+    if ((dna.baseColor === '#f8f9fa' && dna.patternColor === '#ff4d4d') || (dna.baseColor === '#ff4d4d' && dna.patternColor === '#f8f9fa')) score += 500 * genFactor;
+    if ((dna.baseColor === '#343a40' && dna.patternColor === '#ff4d4d') || (dna.baseColor === '#ff4d4d' && dna.patternColor === '#343a40')) score += 400 * genFactor;
+
+    // 紫色を含む場合のボーナス（金より少なめ）
+    if (dna.baseColor === '#9b59b6' || dna.patternColor === '#9b59b6') {
+        if (isPurpleSingle) {
+            score += 1000 * genFactor; // 紫単色
+        } else {
+            score += 500 * genFactor; // 一部に紫が含まれる
+        }
+    }
 
     // 金色を含む場合の特別ボーナス
     if (dna.baseColor === '#ffcc00' || dna.patternColor === '#ffcc00') {
@@ -350,83 +364,86 @@ function breedKoi(parentA, parentB) {
         patternDensity: (parentA.dna.patternDensity + parentB.dna.patternDensity) / 2 + (Math.random() * 0.2 - 0.1)
     };
 
-    // 基本的な突然変異率
-    let mutationRate = 0.15 + (nextGen * 0.05); 
+    // 親の持つ全ての色
+    const parentColors = [parentA.dna.baseColor, parentA.dna.patternColor, parentB.dna.baseColor, parentB.dna.patternColor];
+    const hasColor = (c) => parentColors.includes(c);
+
+    // 突然変異（親にない色が出る、または色が変わる）の判定
+    // 基本は親の色を忠実に遺伝（70%以上）するため、変異率は25%からスタート
+    let mutationRate = 0.25;
     
-    // 白黒のみの初期状態はゲーム進行のため変異率特大
-    let isOnlyBasicColors = (newDna.baseColor === '#f8f9fa' || newDna.baseColor === '#343a40') && 
-                            (newDna.patternColor === '#f8f9fa' || newDna.patternColor === '#343a40');
-    
-    if (isOnlyBasicColors && nextGen >= 2) {
-        mutationRate = 0.85; 
-    } else if (newDna.baseColor === newDna.patternColor) {
-        // 単色（赤単色など）になってしまった場合も、柄を増やすために最低50%は変異するように底上げ
-        mutationRate = Math.max(mutationRate, 0.50);
-    }
+    // 両親が白黒のみの場合は進行のため変異率を上げる
+    let isOnlyBasicColors = parentColors.every(c => c === '#f8f9fa' || c === '#343a40');
+    if (isOnlyBasicColors && nextGen >= 2) mutationRate = 0.8;
 
     if (Math.random() < mutationRate) {
-        // 抽選プールの偏りを再調整
-        let availableColors = ['#f8f9fa', '#343a40']; 
-        
-        if (nextGen >= 2) {
-            availableColors.push('#ff4d4d', '#ff4d4d'); 
-        }
-        if (nextGen >= 3) {
-            availableColors.push('#1aa3ff', '#1aa3ff'); 
-        }
-        if (nextGen >= 5 && historyRed && historyBlue) {
-            availableColors.push('#ffcc00'); 
-        }
+        let newColor = null;
+        let r = Math.random();
 
-        // 変異パターンの決定
-        let mutationType = Math.random();
-        
-        if (mutationType < 0.10) {
-            // 【純色変異 10%】: 両スロットが同じ色になる → 単色品種（緋鯉、浅黄、黄金など）への道
-            let pickedColor = availableColors[Math.floor(Math.random() * availableColors.length)];
-            newDna.baseColor = pickedColor;
-            newDna.patternColor = pickedColor;
-        } else if (mutationType < 0.25) {
-            // 【両スロット変異 15%】: ベースと柄を独立に抽選 → 白写り等の珍しい組み合わせへの道
-            let colorA = availableColors[Math.floor(Math.random() * availableColors.length)];
-            let colorB = availableColors[Math.floor(Math.random() * availableColors.length)];
-            newDna.baseColor = colorA;
-            newDna.patternColor = colorB;
-            // 両色が異なる場合は柄が見えるように密度を調整
-            if (colorA !== colorB && (newDna.patternDensity < 0.15 || newDna.patternDensity > 0.85)) {
-                newDna.patternDensity = 0.3 + Math.random() * 0.4;
+        // 1. 金×金 -> 黄金(金単色) 5%
+        if (hasColor('#ffcc00') && parentA.dna !== parentB.dna && (parentA.dna.baseColor === '#ffcc00' || parentA.dna.patternColor === '#ffcc00') && (parentB.dna.baseColor === '#ffcc00' || parentB.dna.patternColor === '#ffcc00')) {
+            if (r < 0.05) {
+                newColor = '#ffcc00';
+                newDna.baseColor = '#ffcc00';
+                newDna.patternColor = '#ffcc00';
+                newDna.patternDensity = 0.5; // どうせ単色だがバグ防止
             }
-        } else {
-            // 【通常変異 75%】: 1スロットだけ変更（従来の動作）
-            let filteredColors = availableColors.filter(c => c !== newDna.baseColor && c !== newDna.patternColor);
-            if (filteredColors.length === 0) filteredColors = availableColors; 
-            
-            let pickedColor = filteredColors[Math.floor(Math.random() * filteredColors.length)];
+        }
 
-            if (Math.random() < 0.5) newDna.baseColor = pickedColor;
-            else newDna.patternColor = pickedColor;
+        if (!newColor) {
+            // 2. 紫（どちらかに含まれる） -> 金 10%
+            if (hasColor('#9b59b6')) {
+                if (r < 0.10) newColor = '#ffcc00';
+            }
+        }
+
+        if (!newColor) {
+            // 3. 赤＆青（両方含まれる） -> 紫 20%
+            if (hasColor('#ff4d4d') && hasColor('#1aa3ff')) {
+                if (r < 0.20) newColor = '#9b59b6';
+            }
+        }
+
+        if (!newColor) {
+            // 4. 白黒のみ -> 赤 20% / 青 10%
+            if (isOnlyBasicColors && nextGen >= 2) {
+                if (r < 0.20) newColor = '#ff4d4d';
+                else if (r < 0.30) newColor = '#1aa3ff';
+            }
+        }
+
+        if (!newColor) {
+            // その他通常のランダム変異（プールから選ぶ）
+            let pool = ['#f8f9fa', '#343a40'];
+            if (nextGen >= 2) pool.push('#ff4d4d');
+            if (nextGen >= 3) pool.push('#1aa3ff');
+            // 金・紫は特殊変異でのみ出るため通常プールには入れない
+            newColor = pool[Math.floor(Math.random() * pool.length)];
+        }
+
+        // 変異した色をベースかパターンのどちらかに上書きする
+        if (newColor && newColor !== newDna.baseColor && newColor !== newDna.patternColor) {
+            if (Math.random() < 0.5) newDna.baseColor = newColor;
+            else newDna.patternColor = newColor;
             
-            // 柄が見える機会を与える（ただし単色品種の余地も残す）
-            if (newDna.baseColor !== newDna.patternColor && (newDna.patternDensity < 0.15 || newDna.patternDensity > 0.85)) {
-                if (Math.random() < 0.8) {
-                    newDna.patternDensity = 0.3 + Math.random() * 0.4;
-                }
+            // 模様が見えるように密度を調整
+            if (newDna.patternDensity < 0.2 || newDna.patternDensity > 0.8) {
+                newDna.patternDensity = 0.3 + Math.random() * 0.4;
             }
         }
     }
-    
-    // 強制セーフティ: 第2世代のみ、白単色や黒単色を防ぐ（進行停滞防止）
-    // ※第3世代以降は白写り（白+黒）等の品種を発見するため解除する
-    if (nextGen === 2 && newDna.baseColor === newDna.patternColor) {
-        if (newDna.baseColor === '#f8f9fa' || newDna.baseColor === '#343a40') {
+
+    // 第二世代で白黒から赤色を強制的に出す救済（念のため）
+    if (nextGen === 2 && !hasColor('#ff4d4d')) {
+        if (!parentColors.includes('#ff4d4d') && newDna.baseColor === newDna.patternColor) {
             newDna.patternColor = '#ff4d4d';
             newDna.patternDensity = Math.max(0.3, newDna.patternDensity);
             historyRed = true;
         }
     }
-    
-    if (Math.random() < mutationRate) newDna.patternDensity += (Math.random() * 0.4 - 0.2);
-    
+
+    // 密度の揺らぎ
+    newDna.patternDensity += (Math.random() * 0.4 - 0.2);
     // 密度の範囲を広くとることで、単色品種も発見可能にする
     newDna.patternDensity = Math.max(0.05, Math.min(0.95, newDna.patternDensity));
 
@@ -560,20 +577,24 @@ btnSell.addEventListener('click', () => {
 });
 
 btnUpgrade.addEventListener('click', () => {
-    if (playerPoints >= upgradeCost) {
+    if (playerPoints >= upgradeCost && KOI_MAX < 10) {
         playerPoints -= upgradeCost;
         pondLevel++;
-        KOI_MAX += 5; // 鯉の最大数を拡張
+        KOI_MAX += 1; // 鯉の最大数を拡張（+1匹）
         
         let availableHeight = canvas.height - 220;
         let maxRadius = Math.min(canvas.width, availableHeight) / 2;
-        targetPondRadius = Math.min(targetPondRadius + 50, maxRadius); 
+        targetPondRadius = Math.min(targetPondRadius + 15, maxRadius); 
         
         let costShow = upgradeCost;
-        upgradeCost = Math.floor(upgradeCost * 2.5); // インフレ対策として拡張コストを2.5倍へ
+        upgradeCost += 1000; // 拡張コストは1000万円ずつ増加
         
-        showNotification(`池を「レベル${pondLevel}」に拡張しました！ (鯉最大数: ${KOI_MAX}) [-${costShow} 万円]`);
+        showNotification(`池を拡張しました！ (鯉最大数: ${KOI_MAX}) [-${costShow} 万円]`);
+        
+        // 浮遊テキストでも表示
         floatingTexts.push(new FloatingText(`-${costShow} 万円`, POND_CX(), POND_CY(), '#ff4d4d'));
+        
+        saveGame();
         updateHud();
     }
 });
@@ -1227,12 +1248,17 @@ function updateHud() {
     const parents = pond.filter(k => k.selected);
     
     // アップグレードボタンの制御
-    if (playerPoints >= upgradeCost) {
-        btnUpgrade.disabled = false;
-        btnUpgrade.innerText = `池を拡張する (${upgradeCost} 万円)`;
-    } else {
+    if (KOI_MAX >= 10) {
         btnUpgrade.disabled = true;
-        btnUpgrade.innerText = `池拡張 (${upgradeCost} 万円)`;
+        btnUpgrade.innerText = `池拡張 (最大到達)`;
+    } else {
+        if (playerPoints >= upgradeCost) {
+            btnUpgrade.disabled = false;
+            btnUpgrade.innerText = `池を拡張する (${upgradeCost} 万円)`;
+        } else {
+            btnUpgrade.disabled = true;
+            btnUpgrade.innerText = `池拡張 (${upgradeCost} 万円)`;
+        }
     }
 
     if (parents.length > 0) {
