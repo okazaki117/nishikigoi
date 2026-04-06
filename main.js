@@ -74,7 +74,7 @@ const KOI_BREEDS = [
     { id: 'platinum', name: 'プラチナ', desc: '純白に輝く単色' },
     { id: 'karasu', name: '烏鯉', desc: '漆黒の単色' },
     { id: 'higoi', name: '緋鯉', desc: '鮮やかな赤単色' },
-    { id: 'asagi', name: '浅黄', desc: '美しい青の単色' },
+    { id: 'aogoi', name: '青鯉', desc: '美しい青の単色' },
     { id: 'ogon', name: '黄金', desc: '至高の黄金単色' },
     { id: 'kohaku', name: '紅白', desc: '白地に赤模様の王道' },
     { id: 'shiro_utsuri', name: '白写り', desc: '白黒の水墨画模様' },
@@ -90,15 +90,14 @@ function analyzeBreed(dna) {
     let b = dna.baseColor;
     let p = dna.patternColor;
     // 単色判定: 同色、または密度が極端に低い/高い場合
-    let isSingle = (b === p) || (dna.patternDensity <= 0.12) || (dna.patternDensity >= 0.88);
-    // 密度が高い場合は柄色が支配的なので、柄色を代表色とする
-    let color = isSingle ? (dna.patternDensity >= 0.88 ? p : b) : null;
+    let isSingle = (b === p);
+    let color = isSingle ? b : null;
     
     if (isSingle) {
         if (color === '#f8f9fa') return 'platinum';
         if (color === '#343a40') return 'karasu';
         if (color === '#ff4d4d') return 'higoi';
-        if (color === '#1aa3ff') return 'asagi';
+        if (color === '#1aa3ff') return 'aogoi';
         if (color === '#9b59b6') return 'murasaki_single';
         if (color === '#ffcc00') return 'ogon';
     } else {
@@ -298,7 +297,7 @@ let lastVisitorTime = Date.now();
 function evaluateKoi(dna, size, generation) {
     let score = 100; // 基礎スコア（世代の深さでの一律加算を削除。別に世代係数があるのでそれで評価）
     
-    let isSingleColor = (dna.baseColor === dna.patternColor) || (dna.patternDensity <= 0.12) || (dna.patternDensity >= 0.88);
+    let isSingleColor = (dna.baseColor === dna.patternColor);
     // 単色の特別な色かどうか
     let isGoldenOgon = isSingleColor && (dna.baseColor === '#ffcc00');
     let isPurpleSingle = isSingleColor && (dna.baseColor === '#9b59b6');
@@ -318,9 +317,11 @@ function evaluateKoi(dna, size, generation) {
         }
     }
 
-    // 特定の組み合わせボーナス
-    if ((dna.baseColor === '#f8f9fa' && dna.patternColor === '#ff4d4d') || (dna.baseColor === '#ff4d4d' && dna.patternColor === '#f8f9fa')) score += 500 * genFactor;
-    if ((dna.baseColor === '#343a40' && dna.patternColor === '#ff4d4d') || (dna.baseColor === '#ff4d4d' && dna.patternColor === '#343a40')) score += 400 * genFactor;
+    // 特定の組み合わせボーナス（赤と青で統一評価）
+    if ((dna.baseColor === '#f8f9fa' && dna.patternColor === '#ff4d4d') || (dna.baseColor === '#ff4d4d' && dna.patternColor === '#f8f9fa')) score += 500 * genFactor; // 赤+白
+    if ((dna.baseColor === '#f8f9fa' && dna.patternColor === '#1aa3ff') || (dna.baseColor === '#1aa3ff' && dna.patternColor === '#f8f9fa')) score += 500 * genFactor; // 青+白
+    if ((dna.baseColor === '#343a40' && dna.patternColor === '#ff4d4d') || (dna.baseColor === '#ff4d4d' && dna.patternColor === '#343a40')) score += 400 * genFactor; // 赤+黒
+    if ((dna.baseColor === '#343a40' && dna.patternColor === '#1aa3ff') || (dna.baseColor === '#1aa3ff' && dna.patternColor === '#343a40')) score += 400 * genFactor; // 青+黒
 
     // 紫色を含む場合のボーナス（金より少なめ）
     if (dna.baseColor === '#9b59b6' || dna.patternColor === '#9b59b6') {
@@ -376,53 +377,67 @@ function breedKoi(parentA, parentB) {
     let isOnlyBasicColors = parentColors.every(c => c === '#f8f9fa' || c === '#343a40');
     if (isOnlyBasicColors && nextGen >= 2) mutationRate = 0.8;
 
-    if (Math.random() < mutationRate) {
-        let newColor = null;
-        let r = Math.random();
+    // 特別な固定変異（通常変異プールより優先・独立判定）
+    let specialMutation = false;
+    let r = Math.random();
 
-        // 1. 金×金 -> 黄金(金単色) 5%
-        if (hasColor('#ffcc00') && parentA.dna !== parentB.dna && (parentA.dna.baseColor === '#ffcc00' || parentA.dna.patternColor === '#ffcc00') && (parentB.dna.baseColor === '#ffcc00' || parentB.dna.patternColor === '#ffcc00')) {
-            if (r < 0.05) {
-                newColor = '#ffcc00';
-                newDna.baseColor = '#ffcc00';
-                newDna.patternColor = '#ffcc00';
-                newDna.patternDensity = 0.5; // どうせ単色だがバグ防止
+    // 1. 金×金 -> 黄金(金単色) 5%
+    if ((parentA.dna.baseColor === '#ffcc00' || parentA.dna.patternColor === '#ffcc00') && 
+        (parentB.dna.baseColor === '#ffcc00' || parentB.dna.patternColor === '#ffcc00')) {
+        if (r < 0.05) {
+            newDna.baseColor = '#ffcc00';
+            newDna.patternColor = '#ffcc00';
+            newDna.patternDensity = 0.5; // どうせ単色だがバグ防止
+            specialMutation = true;
+        }
+    }
+
+    if (!specialMutation) {
+        // 2. 紫（どちらかに含まれる） -> 金 10%
+        if (hasColor('#9b59b6')) {
+            if (r < 0.10) {
+                newDna.baseColor = Math.random() < 0.5 ? '#ffcc00' : newDna.baseColor;
+                newDna.patternColor = Math.random() >= 0.5 ? '#ffcc00' : newDna.patternColor;
+                specialMutation = true;
             }
         }
+    }
 
-        if (!newColor) {
-            // 2. 紫（どちらかに含まれる） -> 金 10%
-            if (hasColor('#9b59b6')) {
-                if (r < 0.10) newColor = '#ffcc00';
+    if (!specialMutation) {
+        // 3. 赤＆青（両方含まれる） -> 紫 20%
+        if (hasColor('#ff4d4d') && hasColor('#1aa3ff')) {
+            if (r < 0.20) {
+                newDna.baseColor = Math.random() < 0.5 ? '#9b59b6' : newDna.baseColor;
+                newDna.patternColor = Math.random() >= 0.5 ? '#9b59b6' : newDna.patternColor;
+                specialMutation = true;
             }
         }
+    }
 
-        if (!newColor) {
-            // 3. 赤＆青（両方含まれる） -> 紫 20%
-            if (hasColor('#ff4d4d') && hasColor('#1aa3ff')) {
-                if (r < 0.20) newColor = '#9b59b6';
-            }
+    // 4. 白黒のみ -> 赤 20% / 青 10%
+    if (!specialMutation && isOnlyBasicColors && nextGen >= 2) {
+        if (r < 0.20) {
+            newDna.baseColor = Math.random() < 0.5 ? '#ff4d4d' : newDna.baseColor;
+            newDna.patternColor = Math.random() >= 0.5 ? '#ff4d4d' : newDna.patternColor;
+            specialMutation = true;
+        } else if (r < 0.30) {
+            newDna.baseColor = Math.random() < 0.5 ? '#1aa3ff' : newDna.baseColor;
+            newDna.patternColor = Math.random() >= 0.5 ? '#1aa3ff' : newDna.patternColor;
+            specialMutation = true;
         }
+    }
 
-        if (!newColor) {
-            // 4. 白黒のみ -> 赤 20% / 青 10%
-            if (isOnlyBasicColors && nextGen >= 2) {
-                if (r < 0.20) newColor = '#ff4d4d';
-                else if (r < 0.30) newColor = '#1aa3ff';
-            }
-        }
-
-        if (!newColor) {
-            // その他通常のランダム変異（プールから選ぶ）
-            let pool = ['#f8f9fa', '#343a40'];
-            if (nextGen >= 2) pool.push('#ff4d4d');
-            if (nextGen >= 3) pool.push('#1aa3ff');
-            // 金・紫は特殊変異でのみ出るため通常プールには入れない
-            newColor = pool[Math.floor(Math.random() * pool.length)];
-        }
+    // 特別変異がなく、通常の変異判定を満たした場合
+    if (!specialMutation && Math.random() < mutationRate) {
+        // その他通常のランダム変異（プールから選ぶ）
+        let pool = ['#f8f9fa', '#343a40'];
+        if (nextGen >= 2) pool.push('#ff4d4d');
+        if (nextGen >= 3) pool.push('#1aa3ff');
+        
+        let newColor = pool[Math.floor(Math.random() * pool.length)];
 
         // 変異した色をベースかパターンのどちらかに上書きする
-        if (newColor && newColor !== newDna.baseColor && newColor !== newDna.patternColor) {
+        if (newColor !== newDna.baseColor && newColor !== newDna.patternColor) {
             if (Math.random() < 0.5) newDna.baseColor = newColor;
             else newDna.patternColor = newColor;
             
