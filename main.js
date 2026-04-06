@@ -742,11 +742,11 @@ class Koi {
         return (dx * dx + dy * dy) <= (this.size * 1.8) * (this.size * 1.8);
     }
 
-    update(width, height) {
+    update(width, height, dt) {
         // --- 誕生時の中央エフェクト ---
         if (this.state === 'born') {
-            this.stateTimer--;
-            this.wiggle += 0.1;
+            this.stateTimer -= dt;
+            this.wiggle += 0.1 * dt;
             if (this.stateTimer <= 0) {
                 this.state = 'normal';
                 this.fsmState = 'swimming';
@@ -762,44 +762,34 @@ class Koi {
         let targetSpeed = this.baseSpeed;
 
         // --- ステートマシンの更新 (止まる・動くの管理) ---
-        this.fsmTimer--;
+        this.fsmTimer -= dt;
         if (this.fsmState === 'swimming') {
             if (this.fsmTimer <= 0) {
-                this.fsmState = 'idling'; // 休む状態へ移行
-                // 止まっている頻度・時間を増やす (100〜200フレーム: 約1.6秒〜3.3秒)
+                this.fsmState = 'idling';
                 this.fsmTimer = 100 + Math.random() * 100; 
             }
-            // ランダムに少し方向転換
-            if (Math.random() < 0.02) this.angle += (Math.random() - 0.5) * 0.4;
+            if (Math.random() < 0.02 * dt) this.angle += (Math.random() - 0.5) * 0.4;
 
         } else if (this.fsmState === 'idling') {
-            targetSpeed = 0; // ブレーキをかける
+            targetSpeed = 0;
             if (this.fsmTimer <= 0) {
-                this.fsmState = 'swimming'; // 再び泳ぎ出す
-                // 泳ぐ時間を少し短めにし、頻繁に止まるようにする (80〜240フレーム: 約1.3〜4秒)
+                this.fsmState = 'swimming';
                 this.fsmTimer = 80 + Math.random() * 160; 
                 this.angle += (Math.random() - 0.5) * 1.0; 
             }
         }
 
-        // --- 池の境界判定 (壁に当たらないようターンする) ---
-        // 実際の池の半径から自身の大きさなどを引いた安全マージン
+        // --- 池の境界判定 ---
         const safeRadius = targetPondRadius - this.size * 2.0; 
         
         if (distToCenter > safeRadius) {
-            // 池の中心へ向かう角度
             const angleToCenter = Math.atan2(cy - this.y, cx - this.x);
             let diff = angleToCenter - this.angle;
-            
-            // 角度を -PI 〜 PI の範囲に正規化
             while (diff < -Math.PI) diff += Math.PI * 2;
             while (diff > Math.PI) diff -= Math.PI * 2;
-            
-            // 壁に近づくほど強く中心方向へステアリングする
             const urgency = Math.min((distToCenter - safeRadius) / 20.0, 1.0);
-            this.angle += diff * 0.08 * urgency;
+            this.angle += diff * 0.08 * urgency * dt;
             
-            // 壁際にいるときは休憩せず泳いで逃げる
             if (this.fsmState === 'idling') {
                 this.fsmState = 'swimming';
                 this.fsmTimer = 60;
@@ -807,19 +797,20 @@ class Koi {
         }
 
         // 速度を滑らかに加減速させる
-        this.currentSpeed += (targetSpeed - this.currentSpeed) * 0.05;
+        let lerpFactor = 1.0 - Math.pow(1.0 - 0.05, dt); // dt対応の補間
+        this.currentSpeed += (targetSpeed - this.currentSpeed) * lerpFactor;
 
         // 座標更新
         this.vx = Math.cos(this.angle) * this.currentSpeed;
         this.vy = Math.sin(this.angle) * this.currentSpeed;
-        this.x += this.vx;
-        this.y += this.vy;
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
 
-        // ヒレの運動量（静止時もわずかに動かす）
+        // ヒレの運動量
         if (this.currentSpeed > 0.1) {
-            this.wiggle += 0.15 * this.currentSpeed * 2.0; 
+            this.wiggle += 0.15 * this.currentSpeed * 2.0 * dt;
         } else {
-            this.wiggle += 0.03; 
+            this.wiggle += 0.03 * dt; 
         }
     }
 
@@ -1021,9 +1012,9 @@ class FloatingText {
         this.vy = -1.0;
         this.alpha = 1.0;
     }
-    update() {
-        this.y += this.vy;
-        this.timer--;
+    update(dt) {
+        this.y += this.vy * dt;
+        this.timer -= dt;
         if (this.timer < 30) this.alpha = this.timer / 30; 
     }
     draw(ctx) {
@@ -1051,15 +1042,15 @@ class Visitor {
         this.alpha = 0.0;
         this.state = 'fadein';
     }
-    update() {
+    update(dt) {
         if (this.state === 'fadein') {
-            this.alpha += 0.05;
+            this.alpha += 0.05 * dt;
             if (this.alpha >= 1.0) { this.alpha = 1.0; this.state = 'watching'; }
         } else if (this.state === 'watching') {
-            this.timer--;
+            this.timer -= dt;
             if (this.timer <= 0) this.state = 'fadeout';
         } else if (this.state === 'fadeout') {
-            this.alpha -= 0.05;
+            this.alpha -= 0.05 * dt;
         }
     }
     draw(ctx) {
@@ -1291,14 +1282,25 @@ function updateHud() {
     saveGame();
 }
 
-// メインループ
-function gameLoop() {
+// メインループ（deltaTimeベース: リフレッシュレートに依存しない）
+let lastFrameTime = 0;
+
+function gameLoop(timestamp) {
+    // dtを計算（60fpsで dt=1.0 となるよう正規化）
+    if (lastFrameTime === 0) lastFrameTime = timestamp;
+    let deltaMs = timestamp - lastFrameTime;
+    lastFrameTime = timestamp;
+    // 極端なスパイクを防止（タブ復帰時など）
+    if (deltaMs > 100) deltaMs = 16.67;
+    let dt = deltaMs / 16.67; // 60fps基準で正規化
+
     // 画面全体を暗い石畳・地面に見立てた色で塗る
     ctx.fillStyle = '#0b1115';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // アニメーションで半径を目標値に近づける
-    currentPondRadius += (targetPondRadius - currentPondRadius) * 0.05;
+    let pondLerp = 1.0 - Math.pow(1.0 - 0.05, dt);
+    currentPondRadius += (targetPondRadius - currentPondRadius) * pondLerp;
 
     const cx = POND_CX();
     const cy = POND_CY();
@@ -1323,7 +1325,7 @@ function gameLoop() {
 
         // 鯉の更新・描画（clip()を使わない軽量方式）
         pond.forEach(koi => {
-            koi.update(canvas.width, canvas.height);
+            koi.update(canvas.width, canvas.height, dt);
             koi.draw(ctx);
         });
 
@@ -1344,14 +1346,14 @@ function gameLoop() {
     }
 
     // 観客と浮遊テキストの更新・描画（池の外側）
-    visitors.forEach(v => { v.update(); v.draw(ctx); });
+    visitors.forEach(v => { v.update(dt); v.draw(ctx); });
     for (let i = visitors.length - 1; i >= 0; i--) {
         if (visitors[i].state === 'fadeout' && visitors[i].alpha <= 0) {
             visitors.splice(i, 1);
         }
     }
 
-    floatingTexts.forEach(t => { t.update(); t.draw(ctx); });
+    floatingTexts.forEach(t => { t.update(dt); t.draw(ctx); });
     for (let i = floatingTexts.length - 1; i >= 0; i--) {
         if (floatingTexts[i].timer <= 0) floatingTexts.splice(i, 1);
     }
@@ -1398,4 +1400,4 @@ function gameLoop() {
 
 // ゲーム実行
 initGame();
-gameLoop();
+requestAnimationFrame(gameLoop);
