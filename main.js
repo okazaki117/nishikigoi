@@ -83,6 +83,9 @@ const KOI_BREEDS = [
     { id: 'kousou', name: '紅蒼錦', desc: '赤と青が交わる希少種' },
     { id: 'murasaki_single', name: '紫単色', desc: '高貴な深い紫の単色' },
     { id: 'murasaki_kohaku', name: '紫紅白', desc: '白地に紫が映える模様' },
+    { id: 'murasaki_utsuri', name: '紫写り', desc: '漆黒に浮かぶ紫の模様' },
+    { id: 'murasaki_ao', name: '紫蒼錦', desc: '紫と青が混ざり合う妖艶な模様' },
+    { id: 'murasaki_aka', name: '紫紅錦', desc: '紫と赤の情熱的な模様' },
     { id: 'hikarimono', name: '光り物', desc: '金を含む神々しい模様' }
 ];
 
@@ -109,6 +112,9 @@ function analyzeBreed(dna) {
         if (has('#1aa3ff') && (has('#f8f9fa') || has('#343a40'))) return 'shusui';
         if (has('#1aa3ff') && has('#ff4d4d')) return 'kousou';
         if (has('#9b59b6') && has('#f8f9fa')) return 'murasaki_kohaku';
+        if (has('#9b59b6') && has('#343a40')) return 'murasaki_utsuri';
+        if (has('#9b59b6') && has('#1aa3ff')) return 'murasaki_ao';
+        if (has('#9b59b6') && has('#ff4d4d')) return 'murasaki_aka';
     }
     return null; // 不明な組み合わせ（基本発生しない）
 }
@@ -393,36 +399,53 @@ function breedKoi(parentA, parentB) {
     }
 
     if (!specialMutation) {
-        // 2. 紫（どちらかに含まれる） -> 金 10%
+        // 2. 紫（どちらかに含まれる） -> 金柄 10%
         if (hasColor('#9b59b6')) {
             if (r < 0.10) {
-                newDna.baseColor = Math.random() < 0.5 ? '#ffcc00' : newDna.baseColor;
-                newDna.patternColor = Math.random() >= 0.5 ? '#ffcc00' : newDna.patternColor;
+                let applyBase = Math.random() < 0.5;
+                newDna.baseColor = applyBase ? '#ffcc00' : newDna.baseColor;
+                newDna.patternColor = !applyBase ? '#ffcc00' : newDna.patternColor;
                 specialMutation = true;
             }
         }
     }
 
     if (!specialMutation) {
-        // 3. 赤＆青（両方含まれる） -> 紫 20%
+        // 3. 赤＆青（両方含まれる） -> 紫柄 20%
         if (hasColor('#ff4d4d') && hasColor('#1aa3ff')) {
             if (r < 0.20) {
-                newDna.baseColor = Math.random() < 0.5 ? '#9b59b6' : newDna.baseColor;
-                newDna.patternColor = Math.random() >= 0.5 ? '#9b59b6' : newDna.patternColor;
+                let applyBase = Math.random() < 0.5;
+                newDna.baseColor = applyBase ? '#9b59b6' : newDna.baseColor;
+                newDna.patternColor = !applyBase ? '#9b59b6' : newDna.patternColor;
                 specialMutation = true;
             }
         }
     }
 
-    // 4. 白黒のみ -> 赤 20% / 青 10%
+    if (!specialMutation) {
+        // 4. 赤から青が生まれる (10世代目付近で安定して出るように段階的に確率アップ)
+        if (hasColor('#ff4d4d') && !hasColor('#1aa3ff')) {
+            let blueChance = 0.02 + (nextGen * 0.015); // 初弾は低めだが10世代で約17%
+            if (r < blueChance) {
+                let applyBase = Math.random() < 0.5;
+                newDna.baseColor = applyBase ? '#1aa3ff' : newDna.baseColor;
+                newDna.patternColor = !applyBase ? '#1aa3ff' : newDna.patternColor;
+                specialMutation = true;
+            }
+        }
+    }
+
+    // 5. 白黒のみ -> 赤柄 20% / 青柄 10%
     if (!specialMutation && isOnlyBasicColors && nextGen >= 2) {
         if (r < 0.20) {
-            newDna.baseColor = Math.random() < 0.5 ? '#ff4d4d' : newDna.baseColor;
-            newDna.patternColor = Math.random() >= 0.5 ? '#ff4d4d' : newDna.patternColor;
+            let applyBase = Math.random() < 0.5;
+            newDna.baseColor = applyBase ? '#ff4d4d' : newDna.baseColor;
+            newDna.patternColor = !applyBase ? '#ff4d4d' : newDna.patternColor;
             specialMutation = true;
         } else if (r < 0.30) {
-            newDna.baseColor = Math.random() < 0.5 ? '#1aa3ff' : newDna.baseColor;
-            newDna.patternColor = Math.random() >= 0.5 ? '#1aa3ff' : newDna.patternColor;
+            let applyBase = Math.random() < 0.5;
+            newDna.baseColor = applyBase ? '#1aa3ff' : newDna.baseColor;
+            newDna.patternColor = !applyBase ? '#1aa3ff' : newDna.patternColor;
             specialMutation = true;
         }
     }
