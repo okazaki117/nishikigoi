@@ -904,8 +904,11 @@ class Koi {
         ctx.arc(this.size * 1.0,  this.size * 0.25, this.size * 0.12, 0, Math.PI * 2);
         ctx.fill();
 
-        ctx.restore();
+        ctx.restore(); // draw()冒頭のsave()に対応
+    }
 
+    // テキストラベル描画（池のフチより上に描画するため分離）
+    drawLabel(ctx) {
         let isHovered = this.contains(mouseX, mouseY);
 
         if (this.selected || this.state === 'born' || isHovered) {
@@ -916,7 +919,10 @@ class Koi {
             ctx.lineWidth = 3;
             ctx.strokeStyle = 'rgba(0,0,0,0.8)';
             
+            let displayScale = 1.0;
             if (this.state === 'born') {
+                let progress = (180 - this.stateTimer) / 180;
+                displayScale = 1.0 + Math.sin(progress * Math.PI) * 1.0;
                 ctx.fillStyle = '#ffffff';
                 ctx.font = '24px bold Inter';
                 let yPos = -this.size * 3 * displayScale;
@@ -926,15 +932,14 @@ class Koi {
             } else if (this.selected) {
                 ctx.fillStyle = '#ffffff';
                 ctx.font = '14px bold Inter';
-                let yPos = -this.size * 2 * displayScale;
+                let yPos = -this.size * 2;
                 const txt = `Gen ${this.generation} Rank: ${this.rank} / ${this.size.toFixed(1)} cm / ${this.value} 万円`;
                 ctx.strokeText(txt, 0, yPos);
                 ctx.fillText(txt, 0, yPos);
             } else if (isHovered) {
-                // ホバー時のさりげない表示
                 ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
                 ctx.font = '11px normal Inter';
-                ctx.lineWidth = 2; // 少し細く
+                ctx.lineWidth = 2;
                 let yPos = -this.size * 1.8;
                 const txt = `Gen ${this.generation} | Rank ${this.rank}`;
                 ctx.strokeText(txt, 0, yPos);
@@ -1343,6 +1348,11 @@ function gameLoop(timestamp) {
         ctx.strokeStyle = '#04080a';
         ctx.stroke();
         ctx.restore();
+
+        // 鯉のテキストラベルを池のフチの上に描画
+        pond.forEach(koi => {
+            koi.drawLabel(ctx);
+        });
     }
 
     // 観客と浮遊テキストの更新・描画（池の外側）
