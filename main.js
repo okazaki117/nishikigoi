@@ -69,6 +69,16 @@ let collectionData = {
     album: []           // 名品記録の配列（最新30件）
 };
 
+// --- 色定義 ---
+const COLOR_WHITE = '#f8f9fa';
+const COLOR_BLACK = '#343a40';
+const COLOR_RED = '#ff4d4d';
+const COLOR_BLUE = '#1aa3ff';
+const COLOR_PURPLE = '#9b59b6';
+const COLOR_GOLD = '#ffcc00';
+const COLOR_PINK = '#ff66b2';
+const COLOR_SILVER = '#c0c0c0';
+
 // --- 品種定義 ---
 const KOI_BREEDS = [
     { id: 'platinum', name: 'プラチナ', desc: '純白に輝く単色' },
@@ -86,7 +96,13 @@ const KOI_BREEDS = [
     { id: 'murasaki_utsuri', name: '紫写り', desc: '漆黒に浮かぶ紫の模様' },
     { id: 'murasaki_ao', name: '紫蒼錦', desc: '紫と青が混ざり合う妖艶な模様' },
     { id: 'murasaki_aka', name: '紫紅錦', desc: '紫と赤の情熱的な模様' },
-    { id: 'hikarimono', name: '光り物', desc: '金を含む神々しい模様' }
+    { id: 'hikarimono', name: '光り物', desc: '金を含む神々しい模様' },
+    // 新しい色の品種
+    { id: 'pink_single', name: '桜鯉', desc: '優しいピンク色の単色' },
+    { id: 'silver_single', name: '銀鯉', desc: '輝く銀色の単色' },
+    { id: 'gin_kagayaki', name: '銀輝き', desc: '銀色を含む神秘的な輝きを持つ模様' },
+    { id: 'pink_kohaku', name: '桜紅白', desc: '白地にピンクが映える可憐な模様' },
+    { id: 'pink_shusui', name: '桜秋翠', desc: 'ピンクと青の爽やかな模様' }
 ];
 
 function analyzeBreed(dna) {
@@ -103,9 +119,16 @@ function analyzeBreed(dna) {
         if (color === '#1aa3ff') return 'aogoi';
         if (color === '#9b59b6') return 'murasaki_single';
         if (color === '#ffcc00') return 'ogon';
+        if (color === '#ff66b2') return 'pink_single';
+        if (color === '#c0c0c0') return 'silver_single';
     } else {
+        // 金色または銀色を含む組み合わせ
         if (b === '#ffcc00' || p === '#ffcc00') return 'hikarimono';
+        if (b === '#c0c0c0' || p === '#c0c0c0') return 'gin_kagayaki';
+        
         let has = (c) => b === c || p === c;
+        
+        // 既存の組み合わせ判定
         if (has('#f8f9fa') && has('#ff4d4d')) return 'kohaku';
         if (has('#f8f9fa') && has('#343a40')) return 'shiro_utsuri';
         if (has('#343a40') && has('#ff4d4d')) return 'showa';
@@ -115,6 +138,10 @@ function analyzeBreed(dna) {
         if (has('#9b59b6') && has('#343a40')) return 'murasaki_utsuri';
         if (has('#9b59b6') && has('#1aa3ff')) return 'murasaki_ao';
         if (has('#9b59b6') && has('#ff4d4d')) return 'murasaki_aka';
+        
+        // 新しい色の組み合わせ判定
+        if (has('#f8f9fa') && has('#ff66b2')) return 'pink_kohaku';
+        if (has('#1aa3ff') && has('#ff66b2')) return 'pink_shusui';
     }
     return null; // 不明な組み合わせ（基本発生しない）
 }
@@ -344,6 +371,24 @@ function evaluateKoi(dna, size, generation) {
             score += 1500 * genFactor; // 単色の金（黄金）
         } else {
             score += 800 * genFactor;  // 模様の一部に金が含まれる場合
+        }
+    }
+
+    // ピンク色を含む場合のボーナス（紫より少し低め）
+    if (dna.baseColor === '#ff66b2' || dna.patternColor === '#ff66b2') {
+        if (isSingleColor && dna.baseColor === '#ff66b2') {
+            score += 800 * genFactor; // ピンク単色（桜鯉）
+        } else {
+            score += 400 * genFactor; // 一部にピンクが含まれる
+        }
+    }
+
+    // 銀色を含む場合のボーナス（金より少し低め）
+    if (dna.baseColor === '#c0c0c0' || dna.patternColor === '#c0c0c0') {
+        if (isSingleColor && dna.baseColor === '#c0c0c0') {
+            score += 1200 * genFactor; // 銀単色（銀鯉）
+        } else {
+            score += 600 * genFactor;  // 一部に銀が含まれる（銀輝き）
         }
     }
 
@@ -598,6 +643,67 @@ function breedKoi(parentA, parentB) {
                 newDna.patternColor = isPurpleBase ? '#ff4d4d' : '#9b59b6';
                 newDna.patternDensity = 0.3 + Math.random() * 0.4;
                 return 'purple_red_to_murasaki_aka';
+            }
+        });
+    }
+
+    // 5i. 白＋赤 -> ピンク柄（桜紅白）重み8（紫と同じレア度）
+    if (hasColor('#f8f9fa') && hasColor('#ff4d4d')) {
+        applicableRules.push({
+            weight: 8,
+            apply: () => {
+                // 白＋ピンクまたは赤＋ピンクの組み合わせを生成
+                let isWhiteBase = Math.random() < 0.5;
+                let isPinkPattern = Math.random() < 0.5;
+                
+                if (isWhiteBase) {
+                    newDna.baseColor = '#f8f9fa';
+                    newDna.patternColor = isPinkPattern ? '#ff66b2' : '#ff4d4d';
+                } else {
+                    newDna.baseColor = isPinkPattern ? '#ff66b2' : '#ff4d4d';
+                    newDna.patternColor = '#f8f9fa';
+                }
+                newDna.patternDensity = 0.3 + Math.random() * 0.4;
+                return 'white_red_to_pink';
+            }
+        });
+    }
+
+    // 5j. ピンク単色が生まれる 重み10
+    if (hasColor('#ff66b2')) {
+        applicableRules.push({
+            weight: 10,
+            apply: () => {
+                newDna.baseColor = '#ff66b2';
+                newDna.patternColor = '#ff66b2';
+                newDna.patternDensity = 0.5;
+                return 'pink_to_pink_single';
+            }
+        });
+    }
+
+    // 5k. ピンク -> 銀柄 重み4（金と同じレア度）
+    if (hasColor('#ff66b2')) {
+        applicableRules.push({
+            weight: 4,
+            apply: () => {
+                let applyBase = Math.random() < 0.5;
+                newDna.baseColor = applyBase ? '#c0c0c0' : newDna.baseColor;
+                newDna.patternColor = !applyBase ? '#c0c0c0' : newDna.patternColor;
+                return 'pink_to_silver';
+            }
+        });
+    }
+
+    // 5l. 銀単色が生まれる 重み6
+    if (hasColor('#c0c0c0')) {
+        applicableRules.push({
+            weight: 6,
+            apply: () => {
+                newDna.baseColor = '#c0c0c0';
+                newDna.patternColor = '#c0c0c0';
+                newDna.patternDensity = 0.5;
+                return 'silver_to_silver_single';
             }
         });
     }
