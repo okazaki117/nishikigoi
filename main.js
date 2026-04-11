@@ -46,6 +46,11 @@ const BREED_COST = 300;
 let historyRed = false; // 赤色が誕生したか
 let historyBlue = false; // 青色が誕生したか
 
+// 餌システム
+const foodPellets = []; // 池内の餌の配列
+let isFeedingMode = false; // 餌やりモードかどうか
+const FOOD_COST_PER_THROW = 1; // 餌を1回投げるごとのコスト（万円）
+
 // 池のステータス変数
 let KOI_MAX = 5;              // 初期は5匹まで
 let pondLevel = 1;
@@ -327,7 +332,7 @@ const visitors = [];
 let lastVisitorTime = Date.now();
 
 // --- Game Logic ---
-function evaluateKoi(dna, size, generation) {
+function evaluateKoi(dna, size, generation, growthStage = 'adult') {
     let score = 100; // 基礎スコア（世代の深さでの一律加算を削除。別に世代係数があるのでそれで評価）
     
     let isSingleColor = (dna.baseColor === dna.patternColor);
@@ -396,7 +401,14 @@ function evaluateKoi(dna, size, generation) {
     let sizeBonus = Math.max(0, (size - 25) * 35); // 25cm以上からより価値が上がりやすく変更
     score += sizeBonus;
 
-    score = Math.floor(score);
+    // 成長ステージによる評価の調整
+    let growthStageFactor = 1.0;
+    if (growthStage === 'juvenile') {
+        growthStageFactor = 0.6; // 若魚は60%の価値
+    } else if (growthStage === 'fry') {
+        growthStageFactor = 0.3; // 稚魚は30%の価値
+    }
+    score = Math.floor(score * growthStageFactor);
 
     // 古いSランク要件である1400から、インフレ加算により1600へ引き上げ
     let rank = 'C';
@@ -906,6 +918,12 @@ function breedKoi(parentA, parentB) {
     const child = new Koi(POND_CX(), POND_CY(), newDna, nextGen, pSize);
     child.state = 'born';
     child.stateTimer = 180; 
+    
+    // 交配で生まれた鯉は最初稚魚にする
+    child.growthStage = 'fry'; // 稚魚
+    child.growthProgress = 0.0; // 成長進捗0%
+    // 稚魚のサイズを設定
+    child.updateGrowthStage();
 
     // 新たな色（赤・青）の発見記録
     if (newDna.baseColor === '#ff4d4d' || newDna.patternColor === '#ff4d4d') historyRed = true;
@@ -923,16 +941,39 @@ function breedKoi(parentA, parentB) {
     updateHud();
 }
 
+// 通知履歴管理（重複・連続通知防止用）
+let lastNotificationText = '';
+let lastNotificationTime = 0;
+const NOTIFICATION_COOLDOWN = 1500; // 同じ通知は1.5秒以内に出さない
+
 function showNotification(text) {
+    const now = Date.now();
+    
+    // 同じテキストの通知が最近出た場合はスキップ
+    if (text === lastNotificationText && now - lastNotificationTime < NOTIFICATION_COOLDOWN) {
+        return;
+    }
+    
+    // 連続通知を減らすためのフィルタリング
+    if (text.includes('餌を投げました') || text.includes('餌を購入しました')) {
+        // 餌関連の通知は特に制限を厳しく
+        if (now - lastNotificationTime < 1000) return;
+    }
+    
+    lastNotificationText = text;
+    lastNotificationTime = now;
+    
     const area = document.getElementById('notification-area');
     const msg = document.createElement('div');
     msg.className = 'notification';
     msg.innerText = text;
     area.appendChild(msg);
+    
+    // 古い通知を少し早く消す（2.5秒）
     setTimeout(() => {
         msg.classList.add('fade-out');
-        setTimeout(() => msg.remove(), 500);
-    }, 4000);
+        setTimeout(() => msg.remove(), 300);
+    }, 2500);
 }
 
 // --- Event Listeners ---
@@ -994,18 +1035,60 @@ canvas.addEventListener('pointerdown', (e) => {
         }
     }
 
-    if (clickedKoi) {
-        clickedKoi.selected = !clickedKoi.selected;
-        updateHud();
-        if (!koiListPanel.classList.contains('hidden')) updateKoiListUI();
+    // 餌やりモードが有効な場合
+    if (isFeedingMode) {
+        // 餌やりモードでは鯉の選択を無効化（誤タッチ防止）
+        if (clickedKoi) {
+            // 鯉をクリックしても何もしない（誤タッチ防止）
+            return;
+        }
+        
+        // 鯉以外をクリックした場合：餌を投げる
+        if (playerPoints >= FOOD_COST_PER_THROW) {
+            // 餌を投げる（池の範囲内のみ）
+            const cx = POND_CX();
+            const cy = POND_CY();
+            const distFromCenter = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
+            
+            if (distFromCenter <= targetPondRadius * 1.2) { // 池の範囲内なら投げられる
+                playerPoints -= FOOD_COST_PER_THROW;
+                foodPellets.push(new FoodPellet(x, y));
+                // 控え目の通知
+                showNotification(`餌を投げました (-${FOOD_COST_PER_THROW}万円)`);
+                updateHud();
+            } else {
+                showNotification("池の中にだけ餌を投げられます！");
+            }
+        } else {
+            showNotification("お金が足りません！餌を投げるには1万円必要です");
+        }
+    } else {
+        // 通常モード：鯉の選択/選択解除
+        if (clickedKoi) {
+            clickedKoi.selected = !clickedKoi.selected;
+            updateHud();
+            if (!koiListPanel.classList.contains('hidden')) updateKoiListUI();
+        }
+        // 鯉以外をクリックした場合：通常モードでは何もしない（餌は投げない）
     }
 }, { passive: false });
 
 btnBreed.addEventListener('click', () => {
     const parents = pond.filter(k => k.selected);
     if (parents.length === 2 && playerPoints >= BREED_COST && pond.length < KOI_MAX) {
-        playerPoints -= BREED_COST;
-        breedKoi(parents[0], parents[1]);
+        // 成魚のみ交配可能かチェック
+        if (parents[0].growthStage === 'adult' && parents[1].growthStage === 'adult') {
+            playerPoints -= BREED_COST;
+            breedKoi(parents[0], parents[1]);
+        } else {
+            const notAdult = parents.filter(p => p.growthStage !== 'adult');
+            const stageNames = {
+                'fry': '稚魚',
+                'juvenile': '若魚',
+                'adult': '成魚'
+            };
+            showNotification(`成魚のみ交配できます！選択された鯉は${notAdult.map(p => stageNames[p.growthStage]).join('と')}です`);
+        }
     }
 });
 
@@ -1021,8 +1104,11 @@ btnSell.addEventListener('click', () => {
         playerPoints += earned;
         showNotification(`${parents.length}匹の錦鯉とお別れしました。 (+${earned} 万円)`);
         
-        // 浮遊テキストでも表示
-        floatingTexts.push(new FloatingText(`+${earned} 万円`, POND_CX(), POND_CY(), '#ffd700'));
+        // 浮遊テキストでも表示（池の中心からランダムにずらす）
+        floatingTexts.push(new FloatingText(`+${earned} 万円`, 
+            POND_CX() + (Math.random() * 80 - 40), 
+            POND_CY() - 30, // 少し上に表示
+            '#ffd700'));
         
         updateHud();
         if (!koiListPanel.classList.contains('hidden')) updateKoiListUI();
@@ -1059,6 +1145,28 @@ btnReset.addEventListener('click', () => {
     }
 });
 
+// 餌やりモードボタンのイベントハンドラ
+const btnFoodMode = document.getElementById('btn-food-mode');
+btnFoodMode.addEventListener('click', () => {
+    isFeedingMode = !isFeedingMode;
+    const canvas = document.getElementById('game-canvas');
+    const indicator = document.getElementById('feeding-mode-indicator');
+    
+    if (isFeedingMode) {
+        btnFoodMode.classList.add('active');
+        canvas.classList.add('feeding-mode');
+        if (indicator) indicator.classList.add('active');
+        showNotification("餌やりモードが有効になりました。池をタップして餌を投げられます");
+    } else {
+        btnFoodMode.classList.remove('active');
+        canvas.classList.remove('feeding-mode');
+        if (indicator) indicator.classList.remove('active');
+        showNotification("餌やりモードが無効になりました");
+    }
+    updateHud();
+});
+
+
 // --- 鯉一覧パネル ---
 btnList.addEventListener('click', () => {
     koiListPanel.classList.toggle('hidden');
@@ -1075,9 +1183,20 @@ btnListDeselect.addEventListener('click', () => {
 btnListBreed.addEventListener('click', () => {
     const parents = pond.filter(k => k.selected);
     if (parents.length === 2 && playerPoints >= BREED_COST && pond.length < KOI_MAX) {
-        playerPoints -= BREED_COST;
-        breedKoi(parents[0], parents[1]);
-        updateKoiListUI();
+        // 成魚のみ交配可能かチェック
+        if (parents[0].growthStage === 'adult' && parents[1].growthStage === 'adult') {
+            playerPoints -= BREED_COST;
+            breedKoi(parents[0], parents[1]);
+            updateKoiListUI();
+        } else {
+            const notAdult = parents.filter(p => p.growthStage !== 'adult');
+            const stageNames = {
+                'fry': '稚魚',
+                'juvenile': '若魚',
+                'adult': '成魚'
+            };
+            showNotification(`成魚のみ交配できます！選択された鯉は${notAdult.map(p => stageNames[p.growthStage]).join('と')}です`);
+        }
     }
 });
 btnListSell.addEventListener('click', () => {
@@ -1128,7 +1247,21 @@ function updateKoiListUI() {
         const breedDef = breedId ? KOI_BREEDS.find(b => b.id === breedId) : null;
         const breedName = breedDef ? breedDef.name : '不明';
         
-        info.innerHTML = `<span class="koi-gen">Gen ${koi.generation} 「${breedName}」</span>
+        // 成長ステージに応じた表示
+        const stageNames = {
+            'fry': '稚魚 🐣',
+            'juvenile': '若魚 🐠', 
+            'adult': '成魚 🐟'
+        };
+        const stageColor = {
+            'fry': '#a8d8ff',
+            'juvenile': '#4d94ff',
+            'adult': '#0066cc'
+        };
+        const stageText = stageNames[koi.growthStage] || '成魚 🐟';
+        const stageColorVal = stageColor[koi.growthStage] || '#0066cc';
+        
+        info.innerHTML = `<span class="koi-gen">Gen ${koi.generation} 「${breedName}」 <span style="color:${stageColorVal}; font-weight:bold">(${stageText})</span></span>
                           <span class="koi-rank">Rank ${koi.rank} / ${koi.size.toFixed(1)} cm</span>
                           <span class="koi-val">評価額 ${koi.value} 万円 (売却 +${Math.floor(koi.value * 0.4)})</span>`;
         card.appendChild(info);
@@ -1195,6 +1328,29 @@ class Koi {
         // 遊泳ステートマシン用
         this.fsmState = 'swimming'; // 'swimming' or 'idling'
         this.fsmTimer = 100 + Math.random() * 200;
+
+        // 成長システム用プロパティ
+        // 既存の鯉との互換性のため、growthStageが指定されない場合は'adult'とする
+        // 新しい鯉はbreedKoi関数で'fry'に設定される
+        this.growthStage = 'adult'; // 'fry' (稚魚), 'juvenile' (若魚), 'adult' (成魚)
+        this.growthProgress = 1.0; // 0.0-1.0 (成長進捗)
+        this.foodTarget = null; // 追いかけている餌への参照
+        this.foodInterest = 0; // 餌への興味度合い
+        this.isFeeding = false; // 餌を食べている最中か
+        this.feedingTimer = 0; // 餌食べ中タイマー
+        
+        // 成長ステージに応じたサイズ調整
+        // 目標サイズ（最終的なサイズ）
+        this.targetSize = this.size;
+        // 現在の表示サイズ（成長に応じて徐々にtargetSizeに近づく）
+        this.displaySize = this.size;
+        
+        // 稚魚の場合はサイズを小さく開始
+        if (this.growthStage === 'fry') {
+            this.displaySize = this.targetSize * 0.4; // 稚魚は40%のサイズ
+        } else if (this.growthStage === 'juvenile') {
+            this.displaySize = this.targetSize * 0.7; // 若魚は70%のサイズ
+        }
     }
 
     generatePatternSpots() {
@@ -1235,21 +1391,96 @@ class Koi {
         
         let targetSpeed = this.baseSpeed;
 
-        // --- ステートマシンの更新 (止まる・動くの管理) ---
-        this.fsmTimer -= dt;
-        if (this.fsmState === 'swimming') {
-            if (this.fsmTimer <= 0) {
-                this.fsmState = 'idling';
-                this.fsmTimer = 100 + Math.random() * 100; 
+        // --- 餌に対する反応 ---
+        if (!this.isFeeding) {
+            // 餌を探す（視界範囲: 200pxに拡大）
+            let nearestFood = null;
+            let nearestDist = Infinity;
+            
+            for (let i = foodPellets.length - 1; i >= 0; i--) {
+                const food = foodPellets[i];
+                if (!food.isActive()) continue;
+                
+                const dx = food.x - this.x;
+                const dy = food.y - this.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                
+                // 餌が近くにあるかチェック（視界範囲: 200px）
+                if (dist < 200 && dist < nearestDist) {
+                    nearestDist = dist;
+                    nearestFood = food;
+                }
             }
-            if (Math.random() < 0.02 * dt) this.angle += (Math.random() - 0.5) * 0.4;
+            
+            // 餌を見つけた場合、積極的にその方向に向かう
+            if (nearestFood && nearestDist < 200) {
+                const angleToFood = Math.atan2(nearestFood.y - this.y, nearestFood.x - this.x);
+                let diff = angleToFood - this.angle;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+                
+                // 餌への接近度合い（近いほど強く反応）
+                const foodInterest = Math.min(1.0, (200 - nearestDist) / 200);
+                
+                // 積極的に餌の方向に向かう（角度調整を強化）
+                const turnStrength = 0.4 + 0.3 * foodInterest; // 0.4〜0.7の範囲で調整
+                this.angle += diff * turnStrength * dt;
+                
+                // 餌に近づくにつれて速度を大幅に上げる（通常の2.5倍まで）
+                targetSpeed = this.baseSpeed * (1.0 + 1.5 * foodInterest);
+                
+                // 餌に近いときはランダムな方向転換を抑制
+                if (nearestDist < 100) {
+                    // ランダムな方向転換の確率を下げる
+                    if (Math.random() < 0.005 * dt) this.angle += (Math.random() - 0.5) * 0.2;
+                }
+                
+                // 餌に十分近づいたら食べる
+                if (nearestDist < 20) { // 少し距離を緩和（15→20）
+                    this.isFeeding = true;
+                    this.feedingTimer = 30; // 約0.5秒間食べる
+                    this.foodTarget = nearestFood;
+                    
+                    // 餌を食べた効果（成長進捗を増加）
+                    this.growthProgress = Math.min(1.0, this.growthProgress + 0.2); // 餌1個で20%成長（5個で成魚）
+                    
+                    // 餌を削除（配列から削除）
+                    const foodIndex = foodPellets.indexOf(nearestFood);
+                    if (foodIndex > -1) {
+                        foodPellets.splice(foodIndex, 1);
+                    }
+                    
+                    // 成長進捗の浮遊テキストは表示しない（ステージ遷移時に表示する）
+                    // 餌を食べただけではテキストを表示せず、UIで十分
+                }
+            }
+        } else {
+            // 餌を食べている最中
+            this.feedingTimer -= dt;
+            if (this.feedingTimer <= 0) {
+                this.isFeeding = false;
+                this.foodTarget = null;
+            }
+            targetSpeed = 0; // 食べている間は止まる
+        }
 
-        } else if (this.fsmState === 'idling') {
-            targetSpeed = 0;
-            if (this.fsmTimer <= 0) {
-                this.fsmState = 'swimming';
-                this.fsmTimer = 80 + Math.random() * 160; 
-                this.angle += (Math.random() - 0.5) * 1.0; 
+        // --- ステートマシン（止まる・動くの管理） ---
+        if (!this.isFeeding) {
+            this.fsmTimer -= dt;
+            if (this.fsmState === 'swimming') {
+                if (this.fsmTimer <= 0) {
+                    this.fsmState = 'idling';
+                    this.fsmTimer = 100 + Math.random() * 100; 
+                }
+                if (Math.random() < 0.02 * dt) this.angle += (Math.random() - 0.5) * 0.4;
+
+            } else if (this.fsmState === 'idling') {
+                targetSpeed = 0;
+                if (this.fsmTimer <= 0) {
+                    this.fsmState = 'swimming';
+                    this.fsmTimer = 80 + Math.random() * 160; 
+                    this.angle += (Math.random() - 0.5) * 1.0; 
+                }
             }
         }
 
@@ -1286,6 +1517,61 @@ class Koi {
         } else {
             this.wiggle += 0.03 * dt; 
         }
+        
+        // 成長ステージの更新（餌を食べた後など）
+        this.updateGrowthStage();
+    }
+    
+    // 成長ステージの更新
+    updateGrowthStage() {
+        const oldStage = this.growthStage;
+        
+        // 成長進捗に基づいてステージを決定
+        if (this.growthProgress < 0.33) {
+            this.growthStage = 'fry'; // 稚魚
+        } else if (this.growthProgress < 0.67) {
+            this.growthStage = 'juvenile'; // 若魚
+        } else {
+            this.growthStage = 'adult'; // 成魚
+        }
+        
+        // ステージに応じたサイズを計算
+        if (this.growthStage === 'fry') {
+            this.displaySize = this.targetSize * 0.4; // 稚魚は40%のサイズ
+        } else if (this.growthStage === 'juvenile') {
+            this.displaySize = this.targetSize * 0.7; // 若魚は70%のサイズ
+        } else {
+            this.displaySize = this.targetSize; // 成魚は100%のサイズ
+        }
+        
+        // ステージが変わった場合、評価の再計算
+        if (oldStage !== this.growthStage) {
+            const stageNames = {
+                'fry': '稚魚',
+                'juvenile': '若魚', 
+                'adult': '成魚'
+            };
+            
+            // 成魚になった場合のみ浮遊テキストで成長を表示（稚魚→若魚は表示しない）
+            if (this.growthStage === 'adult') {
+                floatingTexts.push(new FloatingText(
+                    `🎉 成魚になりました！`,
+                    this.x + Math.random() * 40 - 20, // ランダムな位置で重なり防止
+                    this.y - 40, 
+                    '#66ff66'
+                ));
+            }
+            
+            // 成長に伴い評価を再計算
+            const appraisal = evaluateKoi(this.dna, this.size, this.generation, this.growthStage);
+            this.rank = appraisal.rank;
+            this.value = appraisal.value;
+            
+            // 成魚になった場合の特別な通知
+            if (this.growthStage === 'adult') {
+                showNotification(`🎉 Gen ${this.generation}の鯉が成魚になりました！`);
+            }
+        }
     }
 
     draw(ctx) {
@@ -1302,7 +1588,7 @@ class Koi {
 
             ctx.fillStyle = `rgba(255, 255, 255, ${Math.sin(progress * Math.PI) * 0.5})`;
             ctx.beginPath();
-            ctx.arc(0, 0, this.size * 3, 0, Math.PI * 2);
+            ctx.arc(0, 0, this.displaySize * 3, 0, Math.PI * 2);
             ctx.fill();
         } else {
             ctx.rotate(this.angle);
@@ -1314,14 +1600,14 @@ class Koi {
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
             ctx.lineWidth = 3;
             ctx.beginPath();
-            ctx.arc(0, 0, this.size * 2.5, 0, Math.PI * 2);
+            ctx.arc(0, 0, this.displaySize * 2.5, 0, Math.PI * 2);
             ctx.fill();
             ctx.stroke();
         } else if (this.state !== 'born') {
             // 影の代わりに黒い楕円を後ろに描画する
             ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
             ctx.beginPath();
-            ctx.ellipse(5, 10, this.size * 1.4, this.size * 0.6, 0, 0, Math.PI * 2);
+            ctx.ellipse(5, 10, this.displaySize * 1.4, this.displaySize * 0.6, 0, 0, Math.PI * 2);
             ctx.fill();
         }
 
@@ -1329,29 +1615,29 @@ class Koi {
         ctx.globalAlpha = 0.8; 
         
         ctx.beginPath();
-        let tailX = -this.size * 1.2;
-        let tailY = Math.sin(this.wiggle) * this.size * 0.6;
-        ctx.moveTo(-this.size * 0.5, 0);
-        ctx.lineTo(tailX - this.size * 0.5, tailY - this.size * 0.6);
-        ctx.lineTo(tailX - this.size * 0.8, tailY);
-        ctx.lineTo(tailX - this.size * 0.5, tailY + this.size * 0.6);
+        let tailX = -this.displaySize * 1.2;
+        let tailY = Math.sin(this.wiggle) * this.displaySize * 0.6;
+        ctx.moveTo(-this.displaySize * 0.5, 0);
+        ctx.lineTo(tailX - this.displaySize * 0.5, tailY - this.displaySize * 0.6);
+        ctx.lineTo(tailX - this.displaySize * 0.8, tailY);
+        ctx.lineTo(tailX - this.displaySize * 0.5, tailY + this.displaySize * 0.6);
         ctx.closePath();
         ctx.fill();
 
         let finAngle = Math.sin(this.wiggle * 0.5) * 0.2; 
         ctx.save(); 
-        ctx.translate(this.size * 0.3, -this.size * 0.4);
+        ctx.translate(this.displaySize * 0.3, -this.displaySize * 0.4);
         ctx.rotate(-0.5 + finAngle);
         ctx.beginPath();
-        ctx.ellipse(0, -this.size * 0.4, this.size * 0.4, this.size * 0.2, 0, 0, Math.PI * 2);
+        ctx.ellipse(0, -this.displaySize * 0.4, this.displaySize * 0.4, this.displaySize * 0.2, 0, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
         
         ctx.save(); 
-        ctx.translate(this.size * 0.3, this.size * 0.4);
+        ctx.translate(this.displaySize * 0.3, this.displaySize * 0.4);
         ctx.rotate(0.5 - finAngle);
         ctx.beginPath();
-        ctx.ellipse(0, this.size * 0.4, this.size * 0.4, this.size * 0.2, 0, 0, Math.PI * 2);
+        ctx.ellipse(0, this.displaySize * 0.4, this.displaySize * 0.4, this.displaySize * 0.2, 0, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
 
@@ -1360,11 +1646,30 @@ class Koi {
         // 体の楕円を描画しつつ、模様描画のクリップにも使う（パス生成1回で済む）
         ctx.save();
         ctx.beginPath();
-        ctx.ellipse(0, 0, this.size * 1.4, this.size * 0.6, 0, 0, Math.PI * 2);
+        ctx.ellipse(0, 0, this.displaySize * 1.4, this.displaySize * 0.6, 0, 0, Math.PI * 2);
         ctx.fill(); // 体を描画
         ctx.clip(); // 同じパスでクリップ
 
-        ctx.fillStyle = this.dna.patternColor;
+        // 成長ステージに応じて模様の透明度を調整（稚魚はぼやける）
+        let patternAlpha = 1.0;
+        if (this.growthStage === 'fry') {
+            patternAlpha = 0.3; // 稚魚は模様が30%の透明度でぼやける
+        } else if (this.growthStage === 'juvenile') {
+            patternAlpha = 0.7; // 若魚は70%の透明度
+        }
+        
+        // 模様の色を設定（透明度を含む）
+        const patternColor = this.dna.patternColor;
+        let rgbaColor = patternColor;
+        if (patternAlpha < 1.0 && patternColor.startsWith('#')) {
+            // HEXをRGBAに変換
+            const r = parseInt(patternColor.slice(1, 3), 16);
+            const g = parseInt(patternColor.slice(3, 5), 16);
+            const b = parseInt(patternColor.slice(5, 7), 16);
+            rgbaColor = `rgba(${r}, ${g}, ${b}, ${patternAlpha})`;
+        }
+        
+        ctx.fillStyle = rgbaColor;
         this.patternSpots.forEach(spot => {
             ctx.beginPath();
             ctx.arc(spot.ox, spot.oy, spot.r, 0, Math.PI * 2);
@@ -1374,8 +1679,8 @@ class Koi {
 
         ctx.fillStyle = '#111111';
         ctx.beginPath();
-        ctx.arc(this.size * 1.0, -this.size * 0.25, this.size * 0.12, 0, Math.PI * 2);
-        ctx.arc(this.size * 1.0,  this.size * 0.25, this.size * 0.12, 0, Math.PI * 2);
+        ctx.arc(this.displaySize * 1.0, -this.displaySize * 0.25, this.displaySize * 0.12, 0, Math.PI * 2);
+        ctx.arc(this.displaySize * 1.0,  this.displaySize * 0.25, this.displaySize * 0.12, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.restore(); // draw()冒頭のsave()に対応
@@ -1427,42 +1732,64 @@ class Koi {
         ctx.save();
         ctx.rotate(-Math.PI / 2); 
         
+        // 成長ステージに応じたサイズを使用
+        const displaySize = this.displaySize || this.size;
+        
         ctx.fillStyle = this.dna.baseColor;
         ctx.beginPath();
-        let tailX = -this.size * 1.2;
-        ctx.moveTo(-this.size * 0.5, 0);
-        ctx.lineTo(tailX - this.size * 0.5, -this.size * 0.4);
-        ctx.lineTo(tailX - this.size * 0.8, 0);
-        ctx.lineTo(tailX - this.size * 0.5, this.size * 0.4);
+        let tailX = -displaySize * 1.2;
+        ctx.moveTo(-displaySize * 0.5, 0);
+        ctx.lineTo(tailX - displaySize * 0.5, -displaySize * 0.4);
+        ctx.lineTo(tailX - displaySize * 0.8, 0);
+        ctx.lineTo(tailX - displaySize * 0.5, displaySize * 0.4);
         ctx.closePath();
         ctx.fill();
 
         ctx.save(); 
-        ctx.translate(this.size * 0.3, -this.size * 0.4);
+        ctx.translate(displaySize * 0.3, -displaySize * 0.4);
         ctx.rotate(-0.5);
         ctx.beginPath();
-        ctx.ellipse(0, -this.size * 0.2, this.size * 0.4, this.size * 0.2, 0, 0, Math.PI * 2);
+        ctx.ellipse(0, -displaySize * 0.2, displaySize * 0.4, displaySize * 0.2, 0, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
         
         ctx.save(); 
-        ctx.translate(this.size * 0.3, this.size * 0.4);
+        ctx.translate(displaySize * 0.3, displaySize * 0.4);
         ctx.rotate(0.5);
         ctx.beginPath();
-        ctx.ellipse(0, this.size * 0.2, this.size * 0.4, this.size * 0.2, 0, 0, Math.PI * 2);
+        ctx.ellipse(0, displaySize * 0.2, displaySize * 0.4, displaySize * 0.2, 0, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
 
         ctx.beginPath();
-        ctx.ellipse(0, 0, this.size * 1.4, this.size * 0.6, 0, 0, Math.PI * 2);
+        ctx.ellipse(0, 0, displaySize * 1.4, displaySize * 0.6, 0, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.save();
         ctx.beginPath();
-        ctx.ellipse(0, 0, this.size * 1.4, this.size * 0.6, 0, 0, Math.PI * 2);
+        ctx.ellipse(0, 0, displaySize * 1.4, displaySize * 0.6, 0, 0, Math.PI * 2);
         ctx.clip(); 
 
-        ctx.fillStyle = this.dna.patternColor;
+        // 成長ステージに応じて模様の透明度を調整（稚魚はぼやける）
+        let patternAlpha = 1.0;
+        if (this.growthStage === 'fry') {
+            patternAlpha = 0.3; // 稚魚は模様が30%の透明度でぼやける
+        } else if (this.growthStage === 'juvenile') {
+            patternAlpha = 0.7; // 若魚は70%の透明度
+        }
+        
+        // 模様の色を設定（透明度を含む）
+        const patternColor = this.dna.patternColor;
+        let rgbaColor = patternColor;
+        if (patternAlpha < 1.0 && patternColor.startsWith('#')) {
+            // HEXをRGBAに変換
+            const r = parseInt(patternColor.slice(1, 3), 16);
+            const g = parseInt(patternColor.slice(3, 5), 16);
+            const b = parseInt(patternColor.slice(5, 7), 16);
+            rgbaColor = `rgba(${r}, ${g}, ${b}, ${patternAlpha})`;
+        }
+        
+        ctx.fillStyle = rgbaColor;
         this.patternSpots.forEach(spot => {
             ctx.beginPath();
             ctx.arc(spot.ox, spot.oy, spot.r, 0, Math.PI * 2);
@@ -1472,8 +1799,8 @@ class Koi {
 
         ctx.fillStyle = '#111111';
         ctx.beginPath();
-        ctx.arc(this.size * 1.0, -this.size * 0.25, this.size * 0.12, 0, Math.PI * 2);
-        ctx.arc(this.size * 1.0,  this.size * 0.25, this.size * 0.12, 0, Math.PI * 2);
+        ctx.arc(displaySize * 1.0, -displaySize * 0.25, displaySize * 0.12, 0, Math.PI * 2);
+        ctx.arc(displaySize * 1.0,  displaySize * 0.25, displaySize * 0.12, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.restore();
@@ -1562,6 +1889,73 @@ class Visitor {
         ctx.fill();
         
         ctx.restore();
+    }
+}
+
+// --- 餌クラス ---
+class FoodPellet {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.radius = 5;
+        this.alpha = 1.0;
+        this.lifetime = 450; // 約7.5秒で消滅（60fps * 7.5）
+        this.attractedKoi = []; // 引き寄せられた鯉の配列
+        this.sinkSpeed = 0.5; // 沈む速度
+        this.hasSettled = false; // 底に沈んだか
+    }
+    
+    update(dt) {
+        // 沈むアニメーション
+        if (!this.hasSettled) {
+            this.y += this.sinkSpeed * dt;
+            // 池の底に達したかチェック
+            const cy = POND_CY();
+            const pondBottom = cy + targetPondRadius * 0.8; // 池の底の位置
+            if (this.y >= pondBottom - this.radius) {
+                this.y = pondBottom - this.radius;
+                this.hasSettled = true;
+            }
+        }
+        
+        // 寿命の減少
+        this.lifetime -= dt;
+        if (this.lifetime < 60) { // 最後の1秒でフェードアウト
+            this.alpha = this.lifetime / 60;
+        }
+    }
+    
+    draw(ctx) {
+        if (this.alpha <= 0) return;
+        
+        ctx.save();
+        ctx.globalAlpha = this.alpha;
+        
+        // 餌の描画（黄色い粒）
+        ctx.fillStyle = '#ffcc00';
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // ハイライト
+        ctx.fillStyle = 'rgba(255, 255, 200, 0.8)';
+        ctx.beginPath();
+        ctx.arc(this.x - this.radius * 0.3, this.y - this.radius * 0.3, this.radius * 0.4, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.restore();
+    }
+    
+    // 餌がまだ有効か（寿命があり、見えるか）
+    isActive() {
+        return this.lifetime > 0 && this.alpha > 0;
+    }
+    
+    // 鯉が餌に近づいているかチェック
+    isNearby(koiX, koiY, distance = 50) {
+        const dx = this.x - koiX;
+        const dy = this.y - koiY;
+        return Math.sqrt(dx * dx + dy * dy) <= distance;
     }
 }
 
@@ -1813,6 +2207,18 @@ function gameLoop(timestamp) {
             koi.draw(ctx);
         });
 
+        // 餌の更新・描画
+        for (let i = foodPellets.length - 1; i >= 0; i--) {
+            const food = foodPellets[i];
+            food.update(dt);
+            food.draw(ctx);
+            
+            // 寿命が切れた餌を削除
+            if (!food.isActive()) {
+                foodPellets.splice(i, 1);
+            }
+        }
+
         // 池のフチを後から上書き描画して、はみ出た鯉を隠す
         ctx.save();
         ctx.beginPath();
@@ -1887,6 +2293,20 @@ function gameLoop(timestamp) {
     requestAnimationFrame(gameLoop);
 }
 
+// デバッグ用: 初期化完了をコンソールに出力
+console.log('Nishikigoi Simulation starting...');
+console.log('Canvas size:', canvas.width, 'x', canvas.height);
+
 // ゲーム実行
-initGame();
+try {
+    initGame();
+    console.log('Game initialized successfully');
+} catch (error) {
+    console.error('Game initialization error:', error);
+    // エラー時のフォールバック初期化
+    pond.length = 0;
+    playerPoints = 1000;
+    showNotification('ゲーム初期化エラー、基本的な状態で開始します');
+}
+
 requestAnimationFrame(gameLoop);

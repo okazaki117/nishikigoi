@@ -97,6 +97,20 @@ body, html {
     cursor: not-allowed;
 }
 
+/* アクティブ状態（餌やりモードなど） */
+.sys-btn.active {
+    background: linear-gradient(135deg, rgba(255, 204, 0, 0.6), rgba(255, 168, 0, 0.8));
+    border-color: rgba(255, 204, 0, 0.8);
+    box-shadow: 0 0 15px rgba(255, 204, 0, 0.5);
+    color: #ffcc00;
+    font-weight: bold;
+}
+
+.sys-btn.active:hover {
+    background: linear-gradient(135deg, rgba(255, 204, 0, 0.8), rgba(255, 168, 0, 1.0));
+    transform: translateY(-2px) scale(1.05);
+}
+
 /* アクションパネル (下部) */
 #action-panel {
     position: absolute;
@@ -540,3 +554,25 @@ body, html {
     -webkit-user-select: none;
     user-select: none;
 }
+
+/* 餌やりモード時のカーソル */
+#game-canvas.feeding-mode {
+    cursor: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><circle cx="12" cy="12" r="8" fill="%23FFCC00" stroke="%23000000" stroke-width="1"/><circle cx="12" cy="12" r="3" fill="%23FFFFFF"/></svg>') 12 12, auto;
+}
+
+/* 餌やりモードボタン (右下) */
+#bottom-controls {
+    position: absolute;
+    bottom: 20px;
+    right: 20px;
+    z-index: 10;
+}
+
+/* モバイル用調整 */
+@media screen and (max-width: 820px) {
+    #bottom-controls {
+        bottom: 10px;
+        right: 10px;
+    }
+}
+
