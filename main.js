@@ -1050,7 +1050,8 @@ canvas.addEventListener('pointerdown', (e) => {
             const cy = POND_CY();
             const distFromCenter = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
             
-            if (distFromCenter <= targetPondRadius * 1.2) { // 池の範囲内なら投げられる
+            // 池の範囲内のみ投げられる（鯉のサイズ分のマージンを考慮）
+            if (distFromCenter <= targetPondRadius) { // 池の縁ギリギリまで投げられる
                 playerPoints -= FOOD_COST_PER_THROW;
                 foodPellets.push(new FoodPellet(x, y));
                 // 控え目の通知
@@ -1393,13 +1394,19 @@ class Koi {
 
         // --- 餌に対する反応 ---
         if (!this.isFeeding) {
-            // 餌を探す（視界範囲: 200pxに拡大）
+            // 餌を探す（視界範囲: 200pxに拡大、ただし池の範囲内の餌のみ）
             let nearestFood = null;
             let nearestDist = Infinity;
             
             for (let i = foodPellets.length - 1; i >= 0; i--) {
                 const food = foodPellets[i];
                 if (!food.isActive()) continue;
+                
+                // 餌が池の範囲内にあるかチェック
+                const foodDistFromCenter = Math.sqrt((food.x - cx) ** 2 + (food.y - cy) ** 2);
+                if (foodDistFromCenter > targetPondRadius - 10) { // 池の縁から10px内側までが有効範囲
+                    continue; // 池の範囲外の餌は無視
+                }
                 
                 const dx = food.x - this.x;
                 const dy = food.y - this.y;
@@ -1435,8 +1442,15 @@ class Koi {
                     if (Math.random() < 0.005 * dt) this.angle += (Math.random() - 0.5) * 0.2;
                 }
                 
-                // 餌に十分近づいたら食べる
-                if (nearestDist < 20) { // 少し距離を緩和（15→20）
+                // 餌に十分近づいたら食べる（成長ステージに応じた距離で優先度調整）
+                let eatDistance = 20; // 標準距離
+                if (this.growthStage === 'fry') {
+                    eatDistance = 25; // 稚魚は遠くからでも食べられる（優先度高）
+                } else if (this.growthStage === 'adult') {
+                    eatDistance = 18; // 成魚は少し近づかないと食べられない（優先度低）
+                }
+                
+                if (nearestDist < eatDistance) {
                     this.isFeeding = true;
                     this.feedingTimer = 30; // 約0.5秒間食べる
                     this.foodTarget = nearestFood;
@@ -1484,21 +1498,34 @@ class Koi {
             }
         }
 
-        // --- 池の境界判定 ---
-        const safeRadius = targetPondRadius - this.size * 2.0; 
+        // --- 池の境界判定（鯉が池の枠から出ないように強力に制限）---
+        const safeRadius = targetPondRadius - Math.max(this.displaySize * 1.8, 25); // 鯉の表示サイズ + 十分なマージン
         
         if (distToCenter > safeRadius) {
             const angleToCenter = Math.atan2(cy - this.y, cx - this.x);
             let diff = angleToCenter - this.angle;
             while (diff < -Math.PI) diff += Math.PI * 2;
             while (diff > Math.PI) diff -= Math.PI * 2;
-            const urgency = Math.min((distToCenter - safeRadius) / 20.0, 1.0);
-            this.angle += diff * 0.08 * urgency * dt;
+            const urgency = Math.min((distToCenter - safeRadius) / 15.0, 1.5); // より強力に戻す
+            this.angle += diff * 0.15 * urgency * dt; // 角度調整を強化
+            
+            // 池の外側に出そうな場合は、強制的に内側方向に速度を加える
+            if (distToCenter > targetPondRadius - this.displaySize) {
+                this.vx += Math.cos(angleToCenter) * 0.1 * dt;
+                this.vy += Math.sin(angleToCenter) * 0.1 * dt;
+            }
             
             if (this.fsmState === 'idling') {
                 this.fsmState = 'swimming';
                 this.fsmTimer = 60;
             }
+        }
+        
+        // 池の外側に出てしまっている場合は強制的に内側に戻す（安全装置）
+        if (distToCenter > targetPondRadius) {
+            const angleToCenter = Math.atan2(cy - this.y, cx - this.x);
+            this.x = cx + Math.cos(angleToCenter) * (targetPondRadius - this.displaySize * 1.5);
+            this.y = cy + Math.sin(angleToCenter) * (targetPondRadius - this.displaySize * 1.5);
         }
 
         // 速度を滑らかに加減速させる
@@ -1892,6 +1919,25 @@ class Visitor {
     }
 }
 
+// 餌の周囲にいる鯉を取得し、成長ステージ優先順位でソート
+function getKoiNearFood(food, maxDistance = 25) {
+    const nearKoi = [];
+    for (const koi of pond) {
+        const dx = food.x - koi.x;
+        const dy = food.y - koi.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < maxDistance) {
+            nearKoi.push({ koi, dist });
+        }
+    }
+    // 成長ステージでソート：稚魚(fry)優先 > 若魚(juvenile) > 成魚(adult)、同じステージなら距離順
+    const stagePriority = { 'fry': 0, 'juvenile': 1, 'adult': 2 };
+    nearKoi.sort((a, b) => {
+        return stagePriority[a.koi.growthStage] - stagePriority[b.koi.growthStage] || a.dist - b.dist;
+    });
+    return nearKoi;
+}
+
 // --- 餌クラス ---
 class FoodPellet {
     constructor(x, y) {
@@ -1903,18 +1949,77 @@ class FoodPellet {
         this.attractedKoi = []; // 引き寄せられた鯉の配列
         this.sinkSpeed = 0.5; // 沈む速度
         this.hasSettled = false; // 底に沈んだか
+        this.initialY = y; // 初期Y座標（落下開始位置）
+        this.maxSinkDistance = 30; // 最大落下距離（px）
+        this.currentSinkDistance = 0; // 現在の落下距離
     }
     
     update(dt) {
-        // 沈むアニメーション
+        // 沈むアニメーション（少しだけ下に落下する）
         if (!this.hasSettled) {
-            this.y += this.sinkSpeed * dt;
-            // 池の底に達したかチェック
+            // 池の中心と半径を計算
+            const cx = POND_CX();
             const cy = POND_CY();
-            const pondBottom = cy + targetPondRadius * 0.8; // 池の底の位置
-            if (this.y >= pondBottom - this.radius) {
-                this.y = pondBottom - this.radius;
-                this.hasSettled = true;
+            
+            // 現在の位置と池の中心からの距離・角度を計算
+            const dx = this.x - cx;
+            const dy = this.y - cy;
+            const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
+            const angleFromCenter = Math.atan2(dy, dx);
+            
+            // 1. 池の範囲外に出そうな場合は、池の縁の内側に調整（常に動作）
+            if (distanceFromCenter > targetPondRadius - this.radius) {
+                const adjustX = cx + Math.cos(angleFromCenter) * (targetPondRadius - this.radius);
+                const adjustY = cy + Math.sin(angleFromCenter) * (targetPondRadius - this.radius);
+                this.x = adjustX;
+                this.y = adjustY;
+                // 調整後は落下距離を再計算（必ず正の値になるように）
+                this.currentSinkDistance = Math.max(0, this.y - this.initialY);
+                
+                // 池の上半分の淵付近に配置された場合、餌はその場で止まる
+                // 池の上半分（初期Yが池の中心より上）かつ淵付近（池の縁から30px以内）の場合
+                if (this.initialY < cy && distanceFromCenter > targetPondRadius - 30) {
+                    this.hasSettled = true;
+                    return; // これ以上処理しない
+                }
+                
+                // 調整後の位置が初期位置より上にある場合もその場で止まる
+                if (this.y < this.initialY) {
+                    this.hasSettled = true;
+                    return;
+                }
+            }
+            
+            // 2. 落下処理（最大落下距離以内の場合のみ）
+            if (this.currentSinkDistance < this.maxSinkDistance) {
+                const prevY = this.y;
+                this.y += this.sinkSpeed * dt;
+                this.currentSinkDistance += Math.abs(this.y - prevY);
+                
+                // 最大落下距離に達したら止まる
+                if (this.currentSinkDistance >= this.maxSinkDistance) {
+                    this.y = this.initialY + this.maxSinkDistance;
+                    this.hasSettled = true;
+                }
+            }
+            
+            // 3. 池の底に達したかチェック（落下中の場合のみ）
+            if (!this.hasSettled) {
+                // 池の上半分（池の中心より上）の場合は、単純に最大落下距離まで落ちるだけ
+                // 池の下半分（池の中心より下）の場合のみ、池の底を考慮
+                if (this.initialY > cy) {
+                    // 池の下半分：池の縁に沿った底の位置を計算
+                    const pondEdgeY = cy + Math.sin(angleFromCenter) * targetPondRadius;
+                    const pondBottom = pondEdgeY - 5; // 池の縁から少し内側が底
+                    
+                    // 現在の位置が池の底より下にある場合は、池の底で止まる
+                    // ただし、最大落下距離に達する前に池の底に着く場合
+                    if (this.y >= pondBottom - this.radius) {
+                        this.y = pondBottom - this.radius;
+                        this.hasSettled = true;
+                    }
+                }
+                // 池の上半分の場合は、池の底の計算を無視して最大落下距離まで落ちるだけ
             }
         }
         
